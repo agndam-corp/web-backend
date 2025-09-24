@@ -6,11 +6,13 @@ on:
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # allow manual trigger
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: agndam-corp/web-backend
+  DOCKER_BUILDKIT: 1
+  BUILDKIT_PROGRESS: plain
 
 jobs:
   build-and-push-image:
@@ -94,8 +96,6 @@ jobs:
         run: |
           cd server-one/apps/webapp/backend
           NEW_TAG="${{ steps.image-tag.outputs.tag }}"
-          
-          # Update the newTag value for the specific image in the kustomization.yaml using sed
           sed -i "s/newTag: .*/newTag: $NEW_TAG/" kustomization.yaml
 
       - name: Commit and push changes
