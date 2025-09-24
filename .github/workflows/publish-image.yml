@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: agndam-corp/webapp-backend
+  IMAGE_NAME: agndam-corp/web-backend
 
 jobs:
   build-and-push-image:
