@@ -2,9 +2,9 @@
 
 # Variables
 REGISTRY = ghcr.io
-USERNAME = damianjaskolski95
-IMAGE = $(REGISTRY)/$(USERNAME)/webapp-backend
-TAG ?= v0.0.3
+USERNAME = agndam-corp
+IMAGE = $(REGISTRY)/$(USERNAME)/web-backend
+TAG ?= latest
 
 # Build Docker image
 build:

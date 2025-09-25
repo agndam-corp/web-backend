@@ -104,11 +104,15 @@ func main() {
 	// Initialize database connection
 	initDB()
 
-	// Set Gin to release mode
-	gin.SetMode(gin.ReleaseMode)
+	// Set Gin to debug mode to see more logs during development
+	gin.SetMode(gin.DebugMode) // Changed from ReleaseMode for better debugging
 
 	// Create router
 	router := gin.Default()
+
+	// Add logging middleware for debugging
+	router.Use(gin.Logger())
+	router.Use(gin.Recovery())
 
 	// Add CORS middleware for all routes
 	router.Use(func(c *gin.Context) {
@@ -121,7 +125,10 @@ func main() {
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", "86400")
 		
+		log.Printf("CORS headers set for origin: %s, method: %s", origin, c.Request.Method)
+		
 		if c.Request.Method == "OPTIONS" {
+			log.Printf("Handling preflight request for: %s", c.Request.URL.Path)
 			c.AbortWithStatus(204)
 			return
 		}
@@ -194,24 +201,33 @@ func main() {
 
 	// Login endpoint to generate JWT token
 	router.POST("/login", func(c *gin.Context) {
+		log.Printf("Login request received from: %s", c.ClientIP())
+		
 		var credentials struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
 
 		if err := c.ShouldBindJSON(&credentials); err != nil {
+			log.Printf("Login request failed validation: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
 			return
 		}
 
+		log.Printf("Attempting authentication for user: %s", credentials.Username)
+		
 		user, authenticated := authenticateUser(credentials.Username, credentials.Password)
 		if !authenticated {
+			log.Printf("Authentication failed for user: %s", credentials.Username)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 			return
 		}
 
+		log.Printf("Authentication successful for user: %s", credentials.Username)
+		
 		token, err := generateToken(user.Username, "user") // Default role for now
 		if err != nil {
+			log.Printf("Failed to generate token for user %s: %v", user.Username, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate token"})
 			return
 		}
@@ -222,6 +238,8 @@ func main() {
 			"expires_in": 3600, // 1 hour in seconds
 			"username":   user.Username,
 		})
+		
+		log.Printf("Login successful for user: %s, token generated", user.Username)
 	})
 
 	// Register endpoint for new users
