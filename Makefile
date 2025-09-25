@@ -7,11 +7,12 @@ IMAGE = $(REGISTRY)/$(USERNAME)/webapp-backend
 TAG ?= v0.0.3
 
 # Build target
-.PHONY: build
-
 build:
-	@echo "Building backend Docker image..."
-	docker build -t $(IMAGE):$(TAG) .
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+
+# Ensure dependencies are up to date
+deps:
+	go mod tidy
 
 # Push target
 .PHONY: push

@@ -1,14 +1,4 @@
-FROM golang:1.25-alpine AS builder
-
-WORKDIR /app
-
-# Copy mod files first to leverage caching
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-
-# Copy source code
-COPY . .
+FROM golang:1.25-alpine AS builder\n\nWORKDIR /app\n\n# Copy mod files first to leverage caching\nCOPY go.mod go.sum ./\nRUN --mount=type=cache,target=/go/pkg/mod \\\n    go mod download\n\n# Copy source code\nCOPY . .\n\n# Tidy modules to ensure all dependencies are included\nRUN go mod tidy
 
 # Build binary with cached builds
 RUN --mount=type=cache,target=/root/.cache/go-build \
