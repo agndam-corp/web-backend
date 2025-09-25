@@ -10,6 +10,11 @@ TAG ?= v0.0.3
 build:
 	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
+# Build Docker image
+docker-build:
+	@echo "Building Docker image $(IMAGE):$(TAG)..."
+	docker build -t $(IMAGE):$(TAG) .
+
 # Ensure dependencies are up to date
 deps:
 	go mod tidy
@@ -25,7 +30,7 @@ push:
 # All-in-one target
 .PHONY: all
 
-all: build push
+all: docker-build push
 
 # Clean target
 .PHONY: clean
