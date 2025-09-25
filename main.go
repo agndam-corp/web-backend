@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"database/sql"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -20,79 +19,34 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/yourusername/webapp-backend/database"
+	"github.com/yourusername/webapp-backend/models"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 var ec2Client *ec2.Client
 var instanceID string
-var db *sql.DB
+
+// SessionTimeout defines how long a user can be inactive before being logged out
+const SessionTimeout = 30 * time.Minute // 30 minutes of inactivity
+
+// AccessTokenExpiry defines how long the JWT access token is valid
+const AccessTokenExpiry = 15 * time.Minute // 15 minutes
+
+// RefreshTokenExpiry defines how long the refresh token is valid (absolute max)
+const RefreshTokenExpiry = 30 * 24 * time.Hour // 30 days
 
 // JWT secret key - should be set via environment variable
 var jwtKey = []byte(os.Getenv("JWT_SECRET"))
 
-// Claims represents JWT claims
-type Claims struct {
-	Username string `json:"username"`
-	Role     string `json:"role"`
+// TokenClaims represents JWT access token claims
+type TokenClaims struct {
+	Username     string `json:"username"`
+	Role         string `json:"role"`
+	SessionID    uint   `json:"session_id"`
+	RefreshToken string `json:"refresh_token"`
 	jwt.RegisteredClaims
-}
-
-// User represents a user in the system
-type User struct {
-	ID       int    `json:"id"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"-"`
-}
-
-func initDB() {
-	// Get database connection details from environment variables
-	dbHost := os.Getenv("DB_HOST")
-	if dbHost == "" {
-		dbHost = "webapp-mariadb.webapp.svc.cluster.local" // Default service name
-	}
-	dbPort := os.Getenv("DB_PORT")
-	if dbPort == "" {
-		dbPort = "3306" // Default MariaDB port
-	}
-	dbUser := os.Getenv("DB_USER")
-	if dbUser == "" {
-		dbUser = "webapp_user"
-	}
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbName := os.Getenv("DB_NAME")
-	if dbName == "" {
-		dbName = "webapp_db"
-	}
-
-	if dbPassword == "" {
-		log.Fatal("DB_PASSWORD environment variable is required")
-	}
-
-	// Format connection string for MySQL/MariaDB
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", dbUser, dbPassword, dbHost, dbPort, dbName)
-
-	var err error
-	db, err = sql.Open("mysql", dsn)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	// Set connection pool settings
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
-	db.SetConnMaxLifetime(5 * time.Minute)
-
-	// Test the connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	
-	if err = db.PingContext(ctx); err != nil {
-		log.Fatalf("Failed to ping database: %v", err)
-	}
-
-	log.Println("Successfully connected to the database")
 }
 
 func main() {
@@ -101,11 +55,11 @@ func main() {
 		log.Fatal("JWT_SECRET environment variable is required")
 	}
 
-	// Initialize database connection
-	initDB()
+	// Initialize database connection with GORM
+	database.InitDB()
 
 	// Set Gin to debug mode to see more logs during development
-	gin.SetMode(gin.DebugMode) // Changed from ReleaseMode for better debugging
+	gin.SetMode(gin.DebugMode)
 
 	// Create router
 	router := gin.Default()
@@ -225,21 +179,91 @@ func main() {
 
 		log.Printf("Authentication successful for user: %s", credentials.Username)
 		
-		token, err := generateToken(user.Username, "user") // Default role for now
+		// Generate access token and refresh token
+		accessToken, refreshToken, err := generateTokens(user)
 		if err != nil {
-			log.Printf("Failed to generate token for user %s: %v", user.Username, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate token"})
+			log.Printf("Failed to generate tokens for user %s: %v", user.Username, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate tokens"})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"token":      token,
-			"role":       "user", // Default role for now
-			"expires_in": 3600, // 1 hour in seconds
-			"username":   user.Username,
+			"access_token": accessToken,
+			"refresh_token": refreshToken,
+			"expires_in":   int64(AccessTokenExpiry.Seconds()),
+			"role":         "user", // Default role for now
+			"username":     user.Username,
 		})
 		
-		log.Printf("Login successful for user: %s, token generated", user.Username)
+		log.Printf("Login successful for user: %s, tokens generated", user.Username)
+	})
+
+	// Refresh token endpoint
+	router.POST("/refresh", func(c *gin.Context) {
+		var refreshTokenReq struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+
+		if err := c.ShouldBindJSON(&refreshTokenReq); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+			return
+		}
+
+		// Verify the refresh token exists in database and hasn't expired
+		var session models.Session
+		result := database.DB.Where("refresh_token = ?", refreshTokenReq.RefreshToken).First(&session)
+		if result.Error != nil {
+			if result.Error == gorm.ErrRecordNotFound {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
+				return
+			}
+			log.Printf("Error querying session: %v", result.Error)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			return
+		}
+
+		// Check if absolute lifetime exceeded (30 days)
+		if time.Since(session.CreatedAt) > RefreshTokenExpiry {
+			// Delete the expired session
+			database.DB.Delete(&session)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired (30 days max)"})
+			return
+		}
+
+		// Check if session timeout exceeded (30 min of inactivity)
+		if time.Since(session.LastActivity) > SessionTimeout {
+			// Delete the expired session
+			database.DB.Delete(&session)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired due to inactivity"})
+			return
+		}
+
+		// Get user info for the new access token
+		var user models.User
+		userResult := database.DB.First(&user, session.UserID)
+		if userResult.Error != nil {
+			log.Printf("Error retrieving user info: %v", userResult.Error)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving user info"})
+			return
+		}
+
+		// Update last activity
+		session.LastActivity = time.Now()
+		database.DB.Save(&session)
+
+		// Generate new access token (reusing the same refresh token)
+		newAccessToken, err := generateAccessToken(user.Username, "user", uint(session.ID), session.RefreshToken)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate new access token"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"access_token": newAccessToken,
+			"expires_in":   int64(AccessTokenExpiry.Seconds()),
+			"role":         "user",
+			"username":     user.Username,
+		})
 	})
 
 	// Register endpoint for new users
@@ -274,10 +298,15 @@ func main() {
 			return
 		}
 
-		// Insert new user
-		query := "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)"
-		_, err = db.Exec(query, userData.Username, userData.Email, string(hashedPassword))
-		if err != nil {
+		// Create new user
+		user := models.User{
+			Username: userData.Username,
+			Email:    userData.Email,
+			Password: string(hashedPassword),
+		}
+
+		result := database.DB.Create(&user)
+		if result.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user"})
 			return
 		}
@@ -322,6 +351,42 @@ func main() {
 
 	// Both admin and operator can check status
 	authorized.GET("/status", getInstanceStatus)
+
+	// Logout endpoint to clear session
+	authorized.POST("/logout", func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == authHeader {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Bearer token required"})
+			return
+		}
+
+		// Parse the token to get the refresh token from claims
+		claims := &TokenClaims{}
+		_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			return jwtKey, nil
+		})
+
+		if err != nil {
+			// Even if token parsing fails, try to delete any matching session
+			c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+			return
+		}
+
+		// Remove session from database using the refresh token
+		var session models.Session
+		result := database.DB.Where("refresh_token = ?", claims.RefreshToken).First(&session)
+		if result.Error == nil {
+			database.DB.Delete(&session)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	})
 
 	// Start server
 	router.Run(":8080")
@@ -372,50 +437,83 @@ func stopInstance(c *gin.Context) {
 }
 
 // authenticateUser authenticates a user against the database
-func authenticateUser(username, password string) (*User, bool) {
-	var user User
-	var hashedPassword string
+func authenticateUser(username, password string) (*models.User, bool) {
+	var user models.User
 
-	query := "SELECT id, username, email, password_hash FROM users WHERE username = ? OR email = ?"
-	err := db.QueryRow(query, username, username).Scan(&user.ID, &user.Username, &user.Email, &hashedPassword)
-	if err != nil {
-		if err == sql.ErrNoRows {
+	// Find user by username or email
+	result := database.DB.Where("username = ? OR email = ?", username, username).First(&user)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
 			return nil, false
 		}
-		log.Printf("Error querying user: %v", err)
+		log.Printf("Error querying user: %v", result.Error)
 		return nil, false
 	}
 
 	// Compare the provided password with the hashed password
-	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
 		return nil, false
 	}
 
-	// Don't expose the password hash
-	user.Password = ""
 	return &user, true
 }
 
 // userExists checks if a user with the given username or email already exists
 func userExists(username, email string) bool {
-	var count int
-	query := "SELECT COUNT(*) FROM users WHERE username = ? OR email = ?"
-	err := db.QueryRow(query, username, email).Scan(&count)
-	if err != nil {
-		log.Printf("Error checking if user exists: %v", err)
+	var user models.User
+	result := database.DB.Where("username = ? OR email = ? ", username, email).First(&user)
+	
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return false
+		}
+		log.Printf("Error checking if user exists: %v", result.Error)
 		return false
 	}
-	return count > 0
+	
+	return true
 }
 
-// generateToken generates a JWT token for a user
-func generateToken(username, role string) (string, error) {
-	// Set token expiration time (1 hour)
-	expirationTime := time.Now().Add(1 * time.Hour)
-	claims := &Claims{
-		Username: username,
-		Role:     role,
+// generateTokens generates both access and refresh tokens
+func generateTokens(user *models.User) (string, string, error) {
+	// Generate a unique refresh token
+	refreshToken := fmt.Sprintf("%d_%s", time.Now().UnixNano(), user.Username)
+
+	// Create session record in database
+	session := models.Session{
+		UserID:       user.ID,
+		RefreshToken: refreshToken,
+		ExpiresAt:    time.Now().Add(RefreshTokenExpiry),
+		LastActivity: time.Now(),
+		CreatedAt:    time.Now(),
+	}
+
+	result := database.DB.Create(&session)
+	if result.Error != nil {
+		return "", "", fmt.Errorf("error creating session: %v", result.Error)
+	}
+
+	// Generate access token
+	accessToken, err := generateAccessToken(user.Username, "user", session.ID, refreshToken)
+	if err != nil {
+		// If access token generation fails, remove the session
+		database.DB.Delete(&session)
+		return "", "", err
+	}
+
+	return accessToken, refreshToken, nil
+}
+
+// generateAccessToken generates a JWT access token
+func generateAccessToken(username, role string, sessionID uint, refreshToken string) (string, error) {
+	// Set token expiration time (15 minutes)
+	expirationTime := time.Now().Add(AccessTokenExpiry)
+	claims := &TokenClaims{
+		Username:     username,
+		Role:         role,
+		SessionID:    sessionID,
+		RefreshToken: refreshToken,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 		},
@@ -448,7 +546,7 @@ func jwtAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		claims := &Claims{}
+		claims := &TokenClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			return jwtKey, nil
 		})
@@ -458,6 +556,34 @@ func jwtAuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		// Check if session exists and is not expired
+		var session models.Session
+		result := database.DB.Where("refresh_token = ?", claims.RefreshToken).First(&session)
+		if result.Error != nil {
+			if result.Error == gorm.ErrRecordNotFound {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Session not found"})
+			} else {
+				log.Printf("Error querying session: %v", result.Error)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			}
+			c.Abort()
+			return
+		}
+
+		// Check if session has expired due to inactivity
+		if time.Now().After(session.ExpiresAt) || time.Since(session.LastActivity) > SessionTimeout {
+			// Session expired, delete it
+			database.DB.Delete(&session)
+			
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired due to inactivity"})
+			c.Abort()
+			return
+		}
+
+		// Update session to extend expiration (sliding session)
+		session.LastActivity = time.Now()
+		database.DB.Save(&session)
 
 		// Add user info to context
 		c.Set("username", claims.Username)
