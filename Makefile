@@ -6,12 +6,8 @@ USERNAME = damianjaskolski95
 IMAGE = $(REGISTRY)/$(USERNAME)/webapp-backend
 TAG ?= v0.0.3
 
-# Build target
-build:
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
-
 # Build Docker image
-docker-build:
+build:
 	@echo "Building Docker image $(IMAGE):$(TAG)..."
 	docker build -t $(IMAGE):$(TAG) .
 
@@ -30,7 +26,7 @@ push:
 # All-in-one target
 .PHONY: all
 
-all: docker-build push
+all: build push
 
 # Clean target
 .PHONY: clean

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -18,35 +20,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	_ "github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var ec2Client *ec2.Client
 var instanceID string
+var db *sql.DB
 
 // JWT secret key - should be set via environment variable
 var jwtKey = []byte(os.Getenv("JWT_SECRET"))
-
-// User represents a user in the system
-type User struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Role     string `json:"role"` // "admin" or "operator"
-}
-
-// Users map for authentication (in production you might want to load from a file or database)
-var users = map[string]User{
-	"admin": {
-		Username: "admin",
-		Password: hashPassword(os.Getenv("ADMIN_PASSWORD")),
-		Role:     "admin",
-	},
-	"operator": {
-		Username: "operator",
-		Password: hashPassword(os.Getenv("OPERATOR_PASSWORD")),
-		Role:     "operator",
-	},
-}
 
 // Claims represents JWT claims
 type Claims struct {
@@ -55,11 +38,71 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// User represents a user in the system
+type User struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Password string `json:"-"`
+}
+
+func initDB() {
+	// Get database connection details from environment variables
+	dbHost := os.Getenv("DB_HOST")
+	if dbHost == "" {
+		dbHost = "webapp-mariadb.webapp.svc.cluster.local" // Default service name
+	}
+	dbPort := os.Getenv("DB_PORT")
+	if dbPort == "" {
+		dbPort = "3306" // Default MariaDB port
+	}
+	dbUser := os.Getenv("DB_USER")
+	if dbUser == "" {
+		dbUser = "webapp_user"
+	}
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "webapp_db"
+	}
+
+	if dbPassword == "" {
+		log.Fatal("DB_PASSWORD environment variable is required")
+	}
+
+	// Format connection string for MySQL/MariaDB
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", dbUser, dbPassword, dbHost, dbPort, dbName)
+
+	var err error
+	db, err = sql.Open("mysql", dsn)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// Set connection pool settings
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	// Test the connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	if err = db.PingContext(ctx); err != nil {
+		log.Fatalf("Failed to ping database: %v", err)
+	}
+
+	log.Println("Successfully connected to the database")
+}
+
 func main() {
 	// Check if JWT_SECRET is set
 	if os.Getenv("JWT_SECRET") == "" {
 		log.Fatal("JWT_SECRET environment variable is required")
 	}
+
+	// Initialize database connection
+	initDB()
 
 	// Set Gin to release mode
 	gin.SetMode(gin.ReleaseMode)
@@ -70,7 +113,7 @@ func main() {
 	// Add CORS middleware for all routes
 	router.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		if origin == "https://djasko.com" || origin == "http://localhost:3000" {
+		if origin == "https://djasko.com" || origin == "http://localhost:3000" || strings.Contains(origin, "localhost") {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -167,17 +210,61 @@ func main() {
 			return
 		}
 
-		token, err := generateToken(user.Username, user.Role)
+		token, err := generateToken(user.Username, "user") // Default role for now
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate token"})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"token":  token,
-			"role":   user.Role,
+			"token":      token,
+			"role":       "user", // Default role for now
 			"expires_in": 3600, // 1 hour in seconds
+			"username":   user.Username,
 		})
+	})
+
+	// Register endpoint for new users
+	router.POST("/register", func(c *gin.Context) {
+		var userData struct {
+			Username string `json:"username"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+
+		if err := c.ShouldBindJSON(&userData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+			return
+		}
+
+		// Validate input
+		if userData.Username == "" || userData.Email == "" || userData.Password == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username, email, and password are required"})
+			return
+		}
+
+		// Check if user already exists
+		if userExists(userData.Username, userData.Email) {
+			c.JSON(http.StatusConflict, gin.H{"error": "User with that username or email already exists"})
+			return
+		}
+
+		// Hash the password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(userData.Password), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
+			return
+		}
+
+		// Insert new user
+		query := "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)"
+		_, err = db.Exec(query, userData.Username, userData.Email, string(hashedPassword))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 	})
 
 	// Add JWT auth middleware for protected routes
@@ -266,16 +353,42 @@ func stopInstance(c *gin.Context) {
 	})
 }
 
-// hashPassword hashes the password using bcrypt
-func hashPassword(password string) string {
-	if password == "" {
-		return ""
-	}
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+// authenticateUser authenticates a user against the database
+func authenticateUser(username, password string) (*User, bool) {
+	var user User
+	var hashedPassword string
+
+	query := "SELECT id, username, email, password_hash FROM users WHERE username = ? OR email = ?"
+	err := db.QueryRow(query, username, username).Scan(&user.ID, &user.Username, &user.Email, &hashedPassword)
 	if err != nil {
-		log.Fatalf("Failed to hash password: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false
+		}
+		log.Printf("Error querying user: %v", err)
+		return nil, false
 	}
-	return string(hashed)
+
+	// Compare the provided password with the hashed password
+	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	if err != nil {
+		return nil, false
+	}
+
+	// Don't expose the password hash
+	user.Password = ""
+	return &user, true
+}
+
+// userExists checks if a user with the given username or email already exists
+func userExists(username, email string) bool {
+	var count int
+	query := "SELECT COUNT(*) FROM users WHERE username = ? OR email = ?"
+	err := db.QueryRow(query, username, email).Scan(&count)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		return false
+	}
+	return count > 0
 }
 
 // generateToken generates a JWT token for a user
@@ -297,22 +410,6 @@ func generateToken(username, role string) (string, error) {
 	}
 
 	return tokenString, nil
-}
-
-// authenticateUser authenticates a user against the credentials
-func authenticateUser(username, password string) (*User, bool) {
-	user, exists := users[username]
-	if !exists {
-		return nil, false
-	}
-
-	// Compare the provided password with the hashed password
-	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
-	if err != nil {
-		return nil, false
-	}
-
-	return &user, true
 }
 
 // jwtAuthMiddleware is the middleware for JWT authentication
