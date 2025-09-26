@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,6 +48,74 @@ type TokenClaims struct {
 	SessionID    uint   `json:"session_id"`
 	RefreshToken string `json:"refresh_token"`
 	jwt.RegisteredClaims
+}
+
+// Middleware to check if user is authenticated
+func authMiddleware(c *gin.Context) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing or invalid"})
+		c.Abort()
+		return
+	}
+
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+	claims := &TokenClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+		c.Abort()
+		return
+	}
+
+	// Check if session is still valid
+	var session models.Session
+	result := database.DB.Where("id = ?", claims.SessionID).First(&session)
+	if result.Error != nil || time.Since(session.LastActivity) > SessionTimeout {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired"})
+		c.Abort()
+		return
+	}
+	
+	// Verify that the session belongs to the expected user (if subject is set)
+	if claims.StandardClaims.Subject != "" {
+		expectedUserID, err := strconv.ParseUint(claims.StandardClaims.Subject, 10, 32)
+		if err == nil && uint(expectedUserID) != session.UserID {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session does not belong to user"})
+			c.Abort()
+			return
+		}
+	}
+
+	// Update last activity
+	database.DB.Model(&session).Update("LastActivity", time.Now())
+
+	// Store user info in context for use in handlers
+	c.Set("user_id", claims.StandardClaims.Subject)
+	c.Set("username", claims.Username)
+	c.Set("role", claims.Role)
+	c.Next()
+}
+
+// Middleware to check if user has admin role
+func adminMiddleware(c *gin.Context) {
+	authMiddleware(c)
+	if c.IsAborted() {
+		return
+	}
+
+	role, exists := c.Get("role")
+	if !exists || role != string(models.RoleAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
+		c.Abort()
+		return
+	}
+
+	c.Next()
 }
 
 func main() {
@@ -153,6 +222,54 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	// Registration endpoint - only creates user role accounts
+	router.POST("/register", func(c *gin.Context) {
+		var userData struct {
+			Username string `json:"username" binding:"required"`
+			Email    string `json:"email" binding:"required"`
+			Password string `json:"password" binding:"required,min=6"`
+			// Note: Role is not included here - only user role can be created via registration
+		}
+
+		if err := c.ShouldBindJSON(&userData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Check if user already exists
+		var existingUser models.User
+		if err := database.DB.Where("username = ? OR email = ?", userData.Username, userData.Email).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "User with this username or email already exists"})
+			return
+		}
+
+		// Hash the password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(userData.Password), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
+			return
+		}
+
+		// Create new user with default 'user' role (not admin)
+		newUser := models.User{
+			Username: userData.Username,
+			Email:    userData.Email,
+			Password: string(hashedPassword),
+			Role:     models.RoleUser, // Explicitly set to user role only
+		}
+
+		if err := database.DB.Create(&newUser).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{
+			"message":  "User registered successfully",
+			"username": newUser.Username,
+			"role":     string(newUser.Role),
+		})
+	})
+
 	// Login endpoint to generate JWT token
 	router.POST("/login", func(c *gin.Context) {
 		log.Printf("Login request received from: %s", c.ClientIP())
@@ -191,7 +308,7 @@ func main() {
 			"access_token": accessToken,
 			"refresh_token": refreshToken,
 			"expires_in":   int64(AccessTokenExpiry.Seconds()),
-			"role":         "user", // Default role for now
+			"role":         string(user.Role), // Use the user's actual role from database
 			"username":     user.Username,
 		})
 		
@@ -248,6 +365,70 @@ func main() {
 		}
 
 		// Update last activity
+		database.DB.Model(&session).Update("LastActivity", time.Now())
+
+		// Generate new tokens
+		newAccessToken, newRefreshToken, err := generateTokens(&user) // Pass the user with correct role
+		if err != nil {
+			log.Printf("Failed to generate new tokens: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate new tokens"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"access_token":  newAccessToken,
+			"refresh_token": newRefreshToken,
+			"expires_in":    int64(AccessTokenExpiry.Seconds()),
+			"role":          string(user.Role), // Use the user's actual role
+			"username":      user.Username,
+		})
+
+		// Admin-only endpoint to create admin users (secure approach)
+		router.POST("/admin/create-admin", adminMiddleware, func(c *gin.Context) {
+			var adminData struct {
+				Username string `json:"username" binding:"required"`
+				Email    string `json:"email" binding:"required"`
+				Password string `json:"password" binding:"required,min=6"`
+			}
+
+			if err := c.ShouldBindJSON(&adminData); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Check if user already exists
+			var existingUser models.User
+			if err := database.DB.Where("username = ? OR email = ?", adminData.Username, adminData.Email).First(&existingUser).Error; err == nil {
+				c.JSON(http.StatusConflict, gin.H{"error": "User with this username or email already exists"})
+				return
+			}
+
+			// Hash the password
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminData.Password), bcrypt.DefaultCost)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
+				return
+			}
+
+			// Create new admin user
+			newAdmin := models.User{
+				Username: adminData.Username,
+				Email:    adminData.Email,
+				Password: string(hashedPassword),
+				Role:     models.RoleAdmin, // Explicitly set to admin role
+			}
+
+			if err := database.DB.Create(&newAdmin).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create admin user"})
+				return
+			}
+
+			c.JSON(http.StatusCreated, gin.H{
+				"message":  "Admin user created successfully",
+				"username": newAdmin.Username,
+				"role":     string(newAdmin.Role),
+			})
+		})
 		session.LastActivity = time.Now()
 		database.DB.Save(&session)
 
@@ -494,8 +675,8 @@ func generateTokens(user *models.User) (string, string, error) {
 		return "", "", fmt.Errorf("error creating session: %v", result.Error)
 	}
 
-	// Generate access token
-	accessToken, err := generateAccessToken(user.Username, "user", session.ID, refreshToken)
+	// Generate access token using user's actual role
+	accessToken, err := generateAccessToken(user.ID, user.Username, string(user.Role), session.ID, refreshToken)
 	if err != nil {
 		// If access token generation fails, remove the session
 		database.DB.Delete(&session)
@@ -506,7 +687,7 @@ func generateTokens(user *models.User) (string, string, error) {
 }
 
 // generateAccessToken generates a JWT access token
-func generateAccessToken(username, role string, sessionID uint, refreshToken string) (string, error) {
+func generateAccessToken(userID uint, username, role string, sessionID uint, refreshToken string) (string, error) {
 	// Set token expiration time (15 minutes)
 	expirationTime := time.Now().Add(AccessTokenExpiry)
 	claims := &TokenClaims{
@@ -515,6 +696,7 @@ func generateAccessToken(username, role string, sessionID uint, refreshToken str
 		SessionID:    sessionID,
 		RefreshToken: refreshToken,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   fmt.Sprintf("%d", userID), // Store user ID as subject for validation
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 		},
 	}

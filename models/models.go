@@ -5,12 +5,21 @@ import (
 	"time"
 )
 
+// Role represents user roles in the system
+type Role string
+
+const (
+	RoleUser  Role = "user"
+	RoleAdmin Role = "admin"
+)
+
 // User represents a user in the system
 type User struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	Username  string         `gorm:"uniqueIndex;not null" json:"username"`
 	Email     string         `gorm:"uniqueIndex;not null" json:"email"`
 	Password  string         `gorm:"column:password_hash;not null" json:"-"` // Don't expose password hash
+	Role      Role           `gorm:"default:user;not null" json:"role"`     // Default to user role
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
