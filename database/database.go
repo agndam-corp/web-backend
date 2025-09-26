@@ -47,61 +47,47 @@ func InitDB() {
 }
 
 func Migrate() error {
-	// First, handle any foreign key constraints that might prevent column modifications
-	// Specifically handle the sessions.user_id foreign key constraint issue
-	if err := handleForeignKeyConstraints(); err != nil {
-		return fmt.Errorf("error handling foreign key constraints: %v", err)
+	// The issue occurs when GORM tries to change column type with foreign key constraint
+	// To safely handle this, we need to drop foreign key constraints, 
+	// perform the migration, and let GORM recreate the constraints properly
+	
+	// Get GORM's migrator instance
+	migrator := DB.Migrator()
+	
+	// Check if sessions table exists
+	sessionsTableExists := migrator.HasTable(&models.Session{})
+	
+	if sessionsTableExists {
+		// If sessions table exists, we may need to handle existing foreign keys
+		// Try to drop the foreign key constraint temporarily
+		// Check if foreign key exists first
+		var fkExists int64
+		DB.Raw(`
+			SELECT COUNT(*) 
+			FROM information_schema.KEY_COLUMN_USAGE 
+			WHERE TABLE_SCHEMA = DATABASE() 
+			AND TABLE_NAME = 'sessions' 
+			AND REFERENCED_TABLE_NAME = 'users'
+			AND CONSTRAINT_NAME = 'sessions_ibfk_1'`).Scan(&fkExists)
+
+		if fkExists > 0 {
+			// Drop the foreign key constraint before migration
+			if err := DB.Exec("ALTER TABLE `sessions` DROP FOREIGN KEY `sessions_ibfk_1`").Error; err != nil {
+				// If constraint doesn't exist now (race condition), continue
+				if !strings.Contains(err.Error(), "check that it exists") {
+					log.Printf("Warning: could not drop foreign key: %v", err)
+				}
+			}
+		}
 	}
 
-	// Auto-migrate the schema
-	err := DB.AutoMigrate(&models.User{}, &models.Session{})
-	if err != nil {
+	// Now run the auto-migration which will handle column types and recreate constraints
+	if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
 		return fmt.Errorf("error migrating database: %v", err)
 	}
 
 	log.Println("Database migration completed successfully")
 	return nil
-}
-
-// handleForeignKeyConstraints handles foreign key constraints that might prevent column modifications
-func handleForeignKeyConstraints() error {
-	// Check if foreign key exists and drop it temporarily if needed
-	// This is needed because MySQL/MariaDB prevents modifying columns that are part of foreign key constraints
-	var result *gorm.DB
-	
-	// Attempt to drop the foreign key constraint if it exists
-	// The constraint name follows MySQL/MariaDB naming convention
-	result = DB.Exec("ALTER TABLE `sessions` DROP FOREIGN KEY `sessions_ibfk_1`")
-	
-	// Check if the error indicates the foreign key doesn't exist (which is fine)
-	if result.Error != nil && !isForeignKeyDoesNotExistError(result.Error) {
-		return result.Error
-	}
-	
-	return nil
-}
-
-// isForeignKeyDoesNotExistError checks if the error is related to foreign key not existing
-func isForeignKeyDoesNotExistError(err error) bool {
-	errStr := err.Error()
-	// Check for error indicating foreign key doesn't exist
-	// Different MySQL/MariaDB versions may have different messages
-	return containsAny(errStr, []string{
-		"Check that column/key exists",
-		"key does not exist",
-		"foreign key constraint does not exist",
-		"errno 1091", // MySQL error code for "Can't DROP"
-	})
-}
-
-// containsAny checks if string contains any of the substrings
-func containsAny(s string, substrings []string) bool {
-	for _, sub := range substrings {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
 }
 
 func getEnv(key, defaultValue string) string {
