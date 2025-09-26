@@ -1,157 +1,25 @@
 package main
 
 import (
-	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
-	"strconv"
-	"strings"
-	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/yourusername/webapp-backend/auth"
+	"github.com/yourusername/webapp-backend/aws"
 	"github.com/yourusername/webapp-backend/database"
-	"github.com/yourusername/webapp-backend/models"
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
+	"github.com/yourusername/webapp-backend/routes"
 )
 
-var ec2Client *ec2.Client
-var instanceID string
-
-// SessionTimeout defines how long a user can be inactive before being logged out
-const SessionTimeout = 30 * time.Minute // 30 minutes of inactivity
-
-// AccessTokenExpiry defines how long the JWT access token is valid
-const AccessTokenExpiry = 15 * time.Minute // 15 minutes
-
-// RefreshTokenExpiry defines how long the refresh token is valid (absolute max)
-const RefreshTokenExpiry = 30 * 24 * time.Hour // 30 days
-
-// JWT secret key - should be set via environment variable
-var jwtKey = []byte(os.Getenv("JWT_SECRET"))
-
-// TokenClaims represents JWT access token claims
-type TokenClaims struct {
-	Username     string `json:"username"`
-	Role         string `json:"role"`
-	SessionID    uint   `json:"session_id"`
-	RefreshToken string `json:"refresh_token"`
-	jwt.RegisteredClaims
-}
-
-// Middleware to check if user is authenticated
-func authMiddleware(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
-	log.Printf("Auth middleware: Authorization header: %s", authHeader)
-	
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		log.Printf("Auth middleware: Missing or invalid authorization header")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing or invalid"})
-		c.Abort()
-		return
-	}
-
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	log.Printf("Auth middleware: Token string length: %d", len(tokenString))
-
-	claims := &TokenClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
-	})
-
-	if err != nil || !token.Valid {
-		log.Printf("Auth middleware: Token validation failed: %v", err)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
-		c.Abort()
-		return
-	}
-
-	log.Printf("Auth middleware: Token claims - Username: %s, Role: %s, Session ID: %d", claims.Username, claims.Role, claims.SessionID)
-
-	// Check if session is still valid
-	var session models.Session
-	result := database.DB.Where("id = ?", claims.SessionID).First(&session)
-	if result.Error != nil {
-		log.Printf("Auth middleware: Session not found: %v", result.Error)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Session not found"})
-		c.Abort()
-		return
-	}
-
-	if time.Since(session.LastActivity) > SessionTimeout {
-		log.Printf("Auth middleware: Session expired due to inactivity")
-		// Delete the expired session
-		database.DB.Delete(&session)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired due to inactivity"})
-		c.Abort()
-		return
-	}
-	
-	// Verify that the session belongs to the expected user (if subject is set)
-	if claims.RegisteredClaims.Subject != "" {
-		expectedUserID, err := strconv.ParseUint(claims.RegisteredClaims.Subject, 10, 32)
-		if err == nil && uint(expectedUserID) != session.UserID {
-			log.Printf("Auth middleware: Session mismatch - Expected user ID %d, got %d", uint(expectedUserID), session.UserID)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session does not belong to user"})
-			c.Abort()
-			return
-		}
-	}
-
-	// Update last activity
-	database.DB.Model(&session).Update("LastActivity", time.Now())
-	log.Printf("Auth middleware: Session activity updated for user ID: %s", claims.RegisteredClaims.Subject)
-
-	// Store user info in context for use in handlers
-	c.Set("user_id", claims.RegisteredClaims.Subject)
-	c.Set("username", claims.Username)
-	c.Set("role", claims.Role)
-	log.Printf("Auth middleware: User authenticated - Username: %s, Role: %s", claims.Username, claims.Role)
-	c.Next()
-}
-
-// Middleware to check if user has admin role
-func adminMiddleware(c *gin.Context) {
-	log.Printf("Admin middleware: Checking admin access")
-	authMiddleware(c)
-	if c.IsAborted() {
-		log.Printf("Admin middleware: Authentication failed, aborting")
-		return
-	}
-
-	role, exists := c.Get("role")
-	log.Printf("Admin middleware: User role check - Role: %v, Exists: %t", role, exists)
-	
-	if !exists || role != string(models.RoleAdmin) {
-		log.Printf("Admin middleware: Access denied - User role: %v, Required: admin", role)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
-		c.Abort()
-		return
-	}
-
-	log.Printf("Admin middleware: Admin access granted")
-	c.Next()
-}
-
 func main() {
-	// Check if JWT_SECRET is set
-	if os.Getenv("JWT_SECRET") == "" {
-		log.Fatal("JWT_SECRET environment variable is required")
-	}
+	// Initialize JWT key
+	auth.InitJWTKey()
 
 	// Initialize database connection with GORM
 	database.InitDB()
+
+	// Initialize AWS clients
+	aws.InitAWS()
 
 	// Set Gin to debug mode to see more logs during development
 	gin.SetMode(gin.DebugMode)
@@ -165,8 +33,8 @@ func main() {
 
 	// Add CORS middleware for all routes
 	router.Use(func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		if origin == "https://djasko.com" || origin == "http://localhost:3000" || strings.Contains(origin, "localhost") {
+		origin := c.GetHeader("Origin")
+		if origin == "https://djasko.com" || origin == "https://api.djasko.com" || origin == "http://localhost:3000" || containsAny(origin, []string{"localhost"}) {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -185,584 +53,43 @@ func main() {
 		c.Next()
 	})
 
-	// Get the instance ID from environment variable
-	instanceID = os.Getenv("VPN_INSTANCE_ID")
-	if instanceID == "" {
-		log.Fatal("VPN_INSTANCE_ID environment variable is required")
-	}
+	// Setup routes
+	routes.SetupRoutes(router)
 
-	// Load client certificate and key for IAM Roles Anywhere
-	certFile := "/etc/ssl/certs/webapp/tls.crt"
-	keyFile := "/etc/ssl/certs/webapp/tls.key"
-	
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		log.Fatalf("Failed to load client certificate: %v", err)
+	// Start the server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
 	
-	// Load CA certificate
-	caCertFile := "/etc/ssl/certs/webapp/ca.crt"
-	caCert, err := ioutil.ReadFile(caCertFile)
-	if err != nil {
-		log.Fatalf("Failed to read CA certificate: %v", err)
+	log.Printf("Starting server on port %s", port)
+	if err := router.Run(":" + port); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
-	
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	// Create custom HTTP client with client certificate for IAM Roles Anywhere
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				RootCAs:      caCertPool,
-			},
-		},
-	}
-
-	// Load AWS configuration with IAM Roles Anywhere support
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(os.Getenv("AWS_REGION")),
-		config.WithHTTPClient(httpClient),
-	)
-	if err != nil {
-		log.Printf("Warning: unable to load AWS SDK config, %v", err)
-		// We'll try to create the client anyway, but operations will fail
-	}
-
-	// Create STS client
-	stsClient := sts.NewFromConfig(cfg)
-
-	// Create credentials using IAM Roles Anywhere
-	// The role ARN is determined by the trust policy in the IAM Roles Anywhere profile
-	creds := stscreds.NewAssumeRoleProvider(stsClient, "unused-parameter")
-
-	// Create EC2 client with the assumed role credentials
-	ec2Client = ec2.NewFromConfig(cfg, func(o *ec2.Options) {
-		o.Credentials = aws.NewCredentialsCache(creds)
-		o.HTTPClient = httpClient
-	})
-
-	// Public routes
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	// Registration endpoint - only creates user role accounts
-	router.POST("/register", func(c *gin.Context) {
-		var userData struct {
-			Username string `json:"username" binding:"required"`
-			Email    string `json:"email" binding:"required"`
-			Password string `json:"password" binding:"required,min=6"`
-			// Note: Role is not included here - only user role can be created via registration
-		}
-
-		if err := c.ShouldBindJSON(&userData); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Check if user already exists
-		var existingUser models.User
-		if err := database.DB.Where("username = ? OR email = ?", userData.Username, userData.Email).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "User with this username or email already exists"})
-			return
-		}
-
-		// Hash the password
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(userData.Password), bcrypt.DefaultCost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
-			return
-		}
-
-		// Create new user with default 'user' role (not admin)
-		newUser := models.User{
-			Username: userData.Username,
-			Email:    userData.Email,
-			Password: string(hashedPassword),
-			Role:     models.RoleUser, // Explicitly set to user role only
-		}
-
-		if err := database.DB.Create(&newUser).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user"})
-			return
-		}
-
-		c.JSON(http.StatusCreated, gin.H{
-			"message":  "User registered successfully",
-			"username": newUser.Username,
-			"role":     string(newUser.Role),
-		})
-	})
-
-	// Login endpoint to generate JWT token
-	router.POST("/login", func(c *gin.Context) {
-		log.Printf("Login request received from: %s", c.ClientIP())
-		
-		var credentials struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
-		}
-
-		if err := c.ShouldBindJSON(&credentials); err != nil {
-			log.Printf("Login request failed validation: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
-			return
-		}
-
-		log.Printf("Attempting authentication for user: %s", credentials.Username)
-		
-		user, authenticated := authenticateUser(credentials.Username, credentials.Password)
-		if !authenticated {
-			log.Printf("Authentication failed for user: %s", credentials.Username)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-			return
-		}
-
-		log.Printf("Authentication successful for user: %s", credentials.Username)
-		
-		// Generate access token and refresh token
-		accessToken, refreshToken, err := generateTokens(user)
-		if err != nil {
-			log.Printf("Failed to generate tokens for user %s: %v", user.Username, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate tokens"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"access_token": accessToken,
-			"refresh_token": refreshToken,
-			"expires_in":   int64(AccessTokenExpiry.Seconds()),
-			"role":         string(user.Role), // Use the user's actual role from database
-			"username":     user.Username,
-		})
-		
-		log.Printf("Login successful for user: %s, tokens generated", user.Username)
-	})
-
-	// Refresh token endpoint
-	router.POST("/refresh", func(c *gin.Context) {
-		var refreshTokenReq struct {
-			RefreshToken string `json:"refresh_token"`
-		}
-
-		if err := c.ShouldBindJSON(&refreshTokenReq); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
-			return
-		}
-
-		// Verify the refresh token exists in database and hasn't expired
-		var session models.Session
-		result := database.DB.Where("refresh_token = ?", refreshTokenReq.RefreshToken).First(&session)
-		if result.Error != nil {
-			if result.Error == gorm.ErrRecordNotFound {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
-				return
-			}
-			log.Printf("Error querying session: %v", result.Error)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-			return
-		}
-
-		// Check if absolute lifetime exceeded (30 days)
-		if time.Since(session.CreatedAt) > RefreshTokenExpiry {
-			// Delete the expired session
-			database.DB.Delete(&session)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired (30 days max)"})
-			return
-		}
-
-		// Check if session timeout exceeded (30 min of inactivity)
-		if time.Since(session.LastActivity) > SessionTimeout {
-			// Delete the expired session
-			database.DB.Delete(&session)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired due to inactivity"})
-			return
-		}
-
-		// Get user info for the new access token
-		var user models.User
-		userResult := database.DB.First(&user, session.UserID)
-		if userResult.Error != nil {
-			log.Printf("Error retrieving user info: %v", userResult.Error)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving user info"})
-			return
-		}
-
-		// Update last activity
-		database.DB.Model(&session).Update("LastActivity", time.Now())
-
-		// Generate new tokens
-		newAccessToken, newRefreshToken, err := generateTokens(&user) // Pass the user with correct role
-		if err != nil {
-			log.Printf("Failed to generate new tokens: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate new tokens"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"access_token":  newAccessToken,
-			"refresh_token": newRefreshToken,
-			"expires_in":    int64(AccessTokenExpiry.Seconds()),
-			"role":          string(user.Role), // Use the user's actual role
-			"username":      user.Username,
-		})
-	})
-
-	// Admin-only endpoint to create admin users (secure approach)
-	router.POST("/admin/create-admin", adminMiddleware, func(c *gin.Context) {
-		var adminData struct {
-			Username string `json:"username" binding:"required"`
-			Email    string `json:"email" binding:"required"`
-			Password string `json:"password" binding:"required,min=6"`
-		}
-
-		if err := c.ShouldBindJSON(&adminData); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Check if user already exists
-		var existingUser models.User
-		if err := database.DB.Where("username = ? OR email = ?", adminData.Username, adminData.Email).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "User with this username or email already exists"})
-			return
-		}
-
-		// Hash the password
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminData.Password), bcrypt.DefaultCost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
-			return
-		}
-
-		// Create new admin user
-		newAdmin := models.User{
-			Username: adminData.Username,
-			Email:    adminData.Email,
-			Password: string(hashedPassword),
-			Role:     models.RoleAdmin, // Explicitly set to admin role
-		}
-
-		if err := database.DB.Create(&newAdmin).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create admin user"})
-			return
-		}
-
-		c.JSON(http.StatusCreated, gin.H{
-			"message":  "Admin user created successfully",
-			"username": newAdmin.Username,
-			"role":     string(newAdmin.Role),
-		})
-	})
-
-	// Register endpoint for new users
-	// Add JWT auth middleware for protected routes
-	authorized := router.Group("/")
-	authorized.Use(jwtAuthMiddleware())
-
-	// Auth check endpoint that returns user info
-	router.GET("/auth-check", jwtAuthMiddleware(), func(c *gin.Context) {
-		username, _ := c.Get("username")
-		role, _ := c.Get("role")
-		c.JSON(http.StatusOK, gin.H{
-			"authenticated": true,
-			"username":      username,
-			"role":          role,
-		})
-	})
-
-	// Define protected routes that interact with AWS
-	// Only admin can start/stop
-	authorized.POST("/start", func(c *gin.Context) {
-		role, _ := c.Get("role")
-		if role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only admin users can start the instance"})
-			return
-		}
-		startInstance(c)
-	})
-
-	authorized.POST("/stop", func(c *gin.Context) {
-		role, _ := c.Get("role")
-		if role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only admin users can stop the instance"})
-			return
-		}
-		stopInstance(c)
-	})
-
-	// Both admin and operator can check status
-	authorized.GET("/status", getInstanceStatus)
-
-	// Logout endpoint to clear session
-	authorized.POST("/logout", func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
-			return
-		}
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Bearer token required"})
-			return
-		}
-
-		// Parse the token to get the refresh token from claims
-		claims := &TokenClaims{}
-		_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-			return jwtKey, nil
-		})
-
-		if err != nil {
-			// Even if token parsing fails, try to delete any matching session
-			c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
-			return
-		}
-
-		// Remove session from database using the refresh token
-		var session models.Session
-		result := database.DB.Where("refresh_token = ?", claims.RefreshToken).First(&session)
-		if result.Error == nil {
-			database.DB.Delete(&session)
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
-	})
-
-	// Start server
-	router.Run(":8080")
 }
 
-func startInstance(c *gin.Context) {
-	if ec2Client == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
-		return
-	}
-
-	input := &ec2.StartInstancesInput{
-		InstanceIds: []string{instanceID},
-	}
-
-	result, err := ec2Client.StartInstances(context.TODO(), input)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Instance start initiated",
-		"result":  result,
-	})
-}
-
-func stopInstance(c *gin.Context) {
-	if ec2Client == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
-		return
-	}
-
-	input := &ec2.StopInstancesInput{
-		InstanceIds: []string{instanceID},
-	}
-
-	result, err := ec2Client.StopInstances(context.TODO(), input)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Instance stop initiated",
-		"result":  result,
-	})
-}
-
-// authenticateUser authenticates a user against the database
-func authenticateUser(username, password string) (*models.User, bool) {
-	var user models.User
-
-	// Find user by username or email
-	result := database.DB.Where("username = ? OR email = ?", username, username).First(&user)
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return nil, false
+// containsAny checks if string contains any of the substrings
+func containsAny(s string, substrings []string) bool {
+	for _, sub := range substrings {
+		if contains(s, sub) {
+			return true
 		}
-		log.Printf("Error querying user: %v", result.Error)
-		return nil, false
 	}
-
-	// Compare the provided password with the hashed password
-	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
-	if err != nil {
-		return nil, false
-	}
-
-	return &user, true
+	return false
 }
 
-// userExists checks if a user with the given username or email already exists
-func userExists(username, email string) bool {
-	var user models.User
-	result := database.DB.Where("username = ? OR email = ? ", username, email).First(&user)
-	
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return false
-		}
-		log.Printf("Error checking if user exists: %v", result.Error)
+// contains checks if string contains substring
+func contains(s, substr string) bool {
+	if len(substr) == 0 {
+		return true
+	}
+	if len(s) < len(substr) {
 		return false
 	}
-	
-	return true
-}
-
-// generateTokens generates both access and refresh tokens
-func generateTokens(user *models.User) (string, string, error) {
-	// Generate a unique refresh token
-	refreshToken := fmt.Sprintf("%d_%s", time.Now().UnixNano(), user.Username)
-
-	// Create session record in database
-	session := models.Session{
-		UserID:       user.ID,
-		RefreshToken: refreshToken,
-		ExpiresAt:    time.Now().Add(RefreshTokenExpiry),
-		LastActivity: time.Now(),
-		CreatedAt:    time.Now(),
-	}
-
-	result := database.DB.Create(&session)
-	if result.Error != nil {
-		return "", "", fmt.Errorf("error creating session: %v", result.Error)
-	}
-
-	// Generate access token using user's actual role
-	accessToken, err := generateAccessToken(user.ID, user.Username, string(user.Role), session.ID, refreshToken)
-	if err != nil {
-		// If access token generation fails, remove the session
-		database.DB.Delete(&session)
-		return "", "", err
-	}
-
-	return accessToken, refreshToken, nil
-}
-
-// generateAccessToken generates a JWT access token
-func generateAccessToken(userID uint, username, role string, sessionID uint, refreshToken string) (string, error) {
-	// Set token expiration time (15 minutes)
-	expirationTime := time.Now().Add(AccessTokenExpiry)
-	claims := &TokenClaims{
-		Username:     username,
-		Role:         role,
-		SessionID:    sessionID,
-		RefreshToken: refreshToken,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   fmt.Sprintf("%d", userID), // Store user ID as subject for validation
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(jwtKey)
-	if err != nil {
-		return "", err
-	}
-
-	return tokenString, nil
-}
-
-// jwtAuthMiddleware is the middleware for JWT authentication
-func jwtAuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
-			c.Abort()
-			return
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
 		}
-
-		// Bearer {token}
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Bearer token required"})
-			c.Abort()
-			return
-		}
-
-		claims := &TokenClaims{}
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-			return jwtKey, nil
-		})
-
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Abort()
-			return
-		}
-
-		// Check if session exists and is not expired
-		var session models.Session
-		result := database.DB.Where("refresh_token = ?", claims.RefreshToken).First(&session)
-		if result.Error != nil {
-			if result.Error == gorm.ErrRecordNotFound {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Session not found"})
-			} else {
-				log.Printf("Error querying session: %v", result.Error)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-			}
-			c.Abort()
-			return
-		}
-
-		// Check if session has expired due to inactivity
-		if time.Now().After(session.ExpiresAt) || time.Since(session.LastActivity) > SessionTimeout {
-			// Session expired, delete it
-			database.DB.Delete(&session)
-			
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session expired due to inactivity"})
-			c.Abort()
-			return
-		}
-
-		// Update session to extend expiration (sliding session)
-		session.LastActivity = time.Now()
-		database.DB.Save(&session)
-
-		// Add user info to context
-		c.Set("username", claims.Username)
-		c.Set("role", claims.Role)
-
-		c.Next()
 	}
-}
-
-func getInstanceStatus(c *gin.Context) {
-	if ec2Client == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
-		return
-	}
-
-	input := &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
-	}
-
-	result, err := ec2Client.DescribeInstances(context.TODO(), input)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
-		return
-	}
-
-	instance := result.Reservations[0].Instances[0]
-	c.JSON(http.StatusOK, gin.H{
-		"instanceId":   *instance.InstanceId,
-		"state":        string(instance.State.Name),
-		"instanceType": string(instance.InstanceType),
-	})
+	return false
 }
