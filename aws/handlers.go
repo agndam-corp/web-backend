@@ -82,7 +82,14 @@ func InitAWS() {
 	})
 }
 
-// StartInstance handles starting the VPN instance
+// StartInstance	godoc
+// @Summary Start VPN instance
+// @Description Start the VPN EC2 instance
+// @Tags VPN Management
+// @Produce json
+// @Success 200 {object} types.SuccessResponse "Instance start command sent"
+// @Failure 500 {object} types.ErrorResponse "Failed to start instance"
+// @Router /start [post]
 func StartInstance(c *gin.Context) {
 	if ec2Client == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
@@ -114,7 +121,14 @@ func StartInstance(c *gin.Context) {
 	}
 }
 
-// StopInstance handles stopping the VPN instance
+// StopInstance	godoc
+// @Summary Stop VPN instance
+// @Description Stop the VPN EC2 instance
+// @Tags VPN Management
+// @Produce json
+// @Success 200 {object} types.SuccessResponse "Instance stop command sent"
+// @Failure 500 {object} types.ErrorResponse "Failed to stop instance"
+// @Router /stop [post]
 func StopInstance(c *gin.Context) {
 	if ec2Client == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
@@ -146,7 +160,15 @@ func StopInstance(c *gin.Context) {
 	}
 }
 
-// GetInstanceStatus retrieves the current status of the VPN instance
+// GetInstanceStatus	godoc
+// @Summary Get VPN instance status
+// @Description Get the current status of the VPN EC2 instance
+// @Tags VPN Management
+// @Produce json
+// @Success 200 {object} types.StatusResponse "Instance status with state and name"
+// @Failure 404 {object} types.ErrorResponse "Instance not found"
+// @Failure 500 {object} types.ErrorResponse "Failed to get instance status"
+// @Router /status [get]
 func GetInstanceStatus(c *gin.Context) {
 	if ec2Client == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})

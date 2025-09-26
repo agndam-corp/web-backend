@@ -52,25 +52,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Successful login with tokens",
                         "schema": {
-                            "$ref": "#/definitions/auth.LoginResponse"
+                            "$ref": "#/definitions/types.LoginResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid request format",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Invalid credentials",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Server error",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     }
                 }
@@ -104,25 +104,25 @@ const docTemplate = `{
                     "200": {
                         "description": "New tokens returned",
                         "schema": {
-                            "$ref": "#/definitions/auth.LoginResponse"
+                            "$ref": "#/definitions/types.LoginResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid request format",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Invalid refresh token",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Server error",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     }
                 }
@@ -174,25 +174,109 @@ const docTemplate = `{
                     "201": {
                         "description": "User registered successfully",
                         "schema": {
-                            "$ref": "#/definitions/auth.SuccessResponse"
+                            "$ref": "#/definitions/types.SuccessResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid request format",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "User already exists",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Server error",
                         "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/start": {
+            "post": {
+                "description": "Start the VPN EC2 instance",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VPN Management"
+                ],
+                "summary": "Start VPN instance",
+                "responses": {
+                    "200": {
+                        "description": "Instance start command sent",
+                        "schema": {
+                            "$ref": "#/definitions/types.SuccessResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start instance",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/status": {
+            "get": {
+                "description": "Get the current status of the VPN EC2 instance",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VPN Management"
+                ],
+                "summary": "Get VPN instance status",
+                "responses": {
+                    "200": {
+                        "description": "Instance status with state and name",
+                        "schema": {
+                            "$ref": "#/definitions/types.StatusResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Instance not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get instance status",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/stop": {
+            "post": {
+                "description": "Stop the VPN EC2 instance",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VPN Management"
+                ],
+                "summary": "Stop VPN instance",
+                "responses": {
+                    "200": {
+                        "description": "Instance stop command sent",
+                        "schema": {
+                            "$ref": "#/definitions/types.SuccessResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to stop instance",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
                         }
                     }
                 }
@@ -200,7 +284,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "auth.ErrorResponse": {
+        "types.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -208,7 +292,7 @@ const docTemplate = `{
                 }
             }
         },
-        "auth.LoginResponse": {
+        "types.LoginResponse": {
             "type": "object",
             "properties": {
                 "access_token": {
@@ -228,7 +312,18 @@ const docTemplate = `{
                 }
             }
         },
-        "auth.SuccessResponse": {
+        "types.StatusResponse": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "types.SuccessResponse": {
             "type": "object",
             "properties": {
                 "data": {},

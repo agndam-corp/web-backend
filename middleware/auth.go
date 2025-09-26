@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/yourusername/webapp-backend/auth"
-	"github.com/yourusername/webapp-backend/database"
-	"github.com/yourusername/webapp-backend/models"
+	"github.com/agndam-corp/web-backend/auth"
+	"github.com/agndam-corp/web-backend/database"
+	"github.com/agndam-corp/web-backend/models"
 )
 
 // AuthMiddleware checks if user is authenticated

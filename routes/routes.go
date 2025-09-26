@@ -4,11 +4,11 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yourusername/webapp-backend/auth"
-	"github.com/yourusername/webapp-backend/aws"
-	"github.com/yourusername/webapp-backend/database"
-	"github.com/yourusername/webapp-backend/middleware"
-	"github.com/yourusername/webapp-backend/models"
+	"github.com/agndam-corp/web-backend/auth"
+	"github.com/agndam-corp/web-backend/aws"
+	"github.com/agndam-corp/web-backend/database"
+	"github.com/agndam-corp/web-backend/middleware"
+	"github.com/agndam-corp/web-backend/models"
 	"golang.org/x/crypto/bcrypt"
 )
 

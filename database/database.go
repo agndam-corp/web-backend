@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/yourusername/webapp-backend/models"
+	"github.com/agndam-corp/web-backend/models"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

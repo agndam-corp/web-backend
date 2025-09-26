@@ -1,10 +1,10 @@
 definitions:
-  auth.ErrorResponse:
+  types.ErrorResponse:
     properties:
       error:
         type: string
     type: object
-  auth.LoginResponse:
+  types.LoginResponse:
     properties:
       access_token:
         type: string
@@ -17,7 +17,14 @@ definitions:
       username:
         type: string
     type: object
-  auth.SuccessResponse:
+  types.StatusResponse:
+    properties:
+      name:
+        type: string
+      state:
+        type: string
+    type: object
+  types.SuccessResponse:
     properties:
       data: {}
       message:
@@ -50,19 +57,19 @@ paths:
         "200":
           description: Successful login with tokens
           schema:
-            $ref: '#/definitions/auth.LoginResponse'
+            $ref: '#/definitions/types.LoginResponse'
         "400":
           description: Invalid request format
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
         "401":
           description: Invalid credentials
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
         "500":
           description: Server error
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
       summary: User login
       tags:
       - Authentication
@@ -84,19 +91,19 @@ paths:
         "200":
           description: New tokens returned
           schema:
-            $ref: '#/definitions/auth.LoginResponse'
+            $ref: '#/definitions/types.LoginResponse'
         "400":
           description: Invalid request format
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
         "401":
           description: Invalid refresh token
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
         "500":
           description: Server error
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
       summary: Refresh JWT token
       tags:
       - Authentication
@@ -130,20 +137,75 @@ paths:
         "201":
           description: User registered successfully
           schema:
-            $ref: '#/definitions/auth.SuccessResponse'
+            $ref: '#/definitions/types.SuccessResponse'
         "400":
           description: Invalid request format
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
         "409":
           description: User already exists
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
         "500":
           description: Server error
           schema:
-            $ref: '#/definitions/auth.ErrorResponse'
+            $ref: '#/definitions/types.ErrorResponse'
       summary: User registration
       tags:
       - Authentication
+  /start:
+    post:
+      description: Start the VPN EC2 instance
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Instance start command sent
+          schema:
+            $ref: '#/definitions/types.SuccessResponse'
+        "500":
+          description: Failed to start instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Start VPN instance
+      tags:
+      - VPN Management
+  /status:
+    get:
+      description: Get the current status of the VPN EC2 instance
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Instance status with state and name
+          schema:
+            $ref: '#/definitions/types.StatusResponse'
+        "404":
+          description: Instance not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to get instance status
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Get VPN instance status
+      tags:
+      - VPN Management
+  /stop:
+    post:
+      description: Stop the VPN EC2 instance
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Instance stop command sent
+          schema:
+            $ref: '#/definitions/types.SuccessResponse'
+        "500":
+          description: Failed to stop instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Stop VPN instance
+      tags:
+      - VPN Management
 swagger: "2.0"

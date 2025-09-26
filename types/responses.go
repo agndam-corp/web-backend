@@ -1,4 +1,4 @@
-package auth
+package types
 
 // LoginResponse represents the response for login requests
 type LoginResponse struct {
@@ -18,4 +18,10 @@ type ErrorResponse struct {
 type SuccessResponse struct {
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
+}
+
+// StatusResponse represents VPN instance status response
+type StatusResponse struct {
+	State string `json:"state"`
+	Name  string `json:"name"`
 }
