@@ -46,58 +46,25 @@ func InitDB() {
 }
 
 func Migrate() error {
-	// The issue occurs when GORM tries to change column type with foreign key constraint
-	// To safely handle this, we'll check the current schema and handle migrations carefully
-	
-	migrator := DB.Migrator()
-	
-	// Check if the sessions table exists
-	sessionsTableExists := migrator.HasTable(&models.Session{})
-	
-	if sessionsTableExists {
-		// If the sessions table already exists, we need to handle potential column type mismatches
-		// First, check if the user_id column has the expected type
-		
-		// Get column information for user_id
-		var columnInfo []map[string]interface{}
-		DB.Raw(`
-			SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, EXTRA
-			FROM information_schema.COLUMNS 
-			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sessions' AND COLUMN_NAME = 'user_id'
-		`).Scan(&columnInfo)
-		
-		if len(columnInfo) > 0 {
-			// The column exists, check its type
-			log.Printf("Current user_id column info: %+v", columnInfo[0])
-			
-			// Since the error indicates GORM wants to change to 'bigint unsigned NOT NULL'
-			// We'll try a different approach: temporarily disable foreign key checks
-			if err := DB.Exec("SET FOREIGN_KEY_CHECKS = 0").Error; err != nil {
-				return fmt.Errorf("error disabling foreign key checks: %v", err)
-			}
-			
-			// Perform the migration with foreign key checks disabled
-			if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
-				// Re-enable foreign key checks before returning error
-				DB.Exec("SET FOREIGN_KEY_CHECKS = 1")
-				return fmt.Errorf("error migrating database: %v", err)
-			}
-			
-			// Re-enable foreign key checks
-			if err := DB.Exec("SET FOREIGN_KEY_CHECKS = 1").Error; err != nil {
-				log.Printf("Warning: error re-enabling foreign key checks: %v", err)
-			}
-		} else {
-			// Column doesn't exist, safe to migrate normally
-			if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
-				return fmt.Errorf("error migrating database: %v", err)
-			}
+	// Check if we should reset the database (useful for development or when schema is problematic)
+	resetDB := os.Getenv("RESET_DATABASE") == "true"
+	if resetDB {
+		log.Println("Resetting database - dropping all tables")
+		err := DB.Migrator().DropTable(&models.User{}, &models.Session{})
+		if err != nil {
+			log.Printf("Warning: error dropping tables: %v", err)
+			// Continue anyway, might be because tables don't exist yet
 		}
-	} else {
-		// If table doesn't exist, normal migration is safe
-		if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
-			return fmt.Errorf("error migrating database: %v", err)
-		}
+	}
+
+	// First, ensure the User table is migrated (this is the referenced table)
+	if err := DB.AutoMigrate(&models.User{}); err != nil {
+		return fmt.Errorf("error migrating User table: %v", err)
+	}
+	
+	// Then migrate the Session table
+	if err := DB.AutoMigrate(&models.Session{}); err != nil {
+		return fmt.Errorf("error migrating Session table: %v", err)
 	}
 
 	log.Println("Database migration completed successfully")
