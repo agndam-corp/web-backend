@@ -432,53 +432,6 @@ func main() {
 	})
 
 	// Register endpoint for new users
-	router.POST("/register", func(c *gin.Context) {
-		var userData struct {
-			Username string `json:"username"`
-			Email    string `json:"email"`
-			Password string `json:"password"`
-		}
-
-		if err := c.ShouldBindJSON(&userData); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
-			return
-		}
-
-		// Validate input
-		if userData.Username == "" || userData.Email == "" || userData.Password == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Username, email, and password are required"})
-			return
-		}
-
-		// Check if user already exists
-		if userExists(userData.Username, userData.Email) {
-			c.JSON(http.StatusConflict, gin.H{"error": "User with that username or email already exists"})
-			return
-		}
-
-		// Hash the password
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(userData.Password), bcrypt.DefaultCost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
-			return
-		}
-
-		// Create new user
-		user := models.User{
-			Username: userData.Username,
-			Email:    userData.Email,
-			Password: string(hashedPassword),
-		}
-
-		result := database.DB.Create(&user)
-		if result.Error != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
-	})
-
 	// Add JWT auth middleware for protected routes
 	authorized := router.Group("/")
 	authorized.Use(jwtAuthMiddleware())
