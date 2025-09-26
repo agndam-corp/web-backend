@@ -95,7 +95,7 @@ func authMiddleware(c *gin.Context) {
 	database.DB.Model(&session).Update("LastActivity", time.Now())
 
 	// Store user info in context for use in handlers
-	c.Set("user_id", claims.StandardClaims.Subject)
+	c.Set("user_id", claims.RegisteredClaims.Subject)
 	c.Set("username", claims.Username)
 	c.Set("role", claims.Role)
 	c.Next()
@@ -382,68 +382,52 @@ func main() {
 			"role":          string(user.Role), // Use the user's actual role
 			"username":      user.Username,
 		})
+	})
 
-		// Admin-only endpoint to create admin users (secure approach)
-		router.POST("/admin/create-admin", adminMiddleware, func(c *gin.Context) {
-			var adminData struct {
-				Username string `json:"username" binding:"required"`
-				Email    string `json:"email" binding:"required"`
-				Password string `json:"password" binding:"required,min=6"`
-			}
+	// Admin-only endpoint to create admin users (secure approach)
+	router.POST("/admin/create-admin", adminMiddleware, func(c *gin.Context) {
+		var adminData struct {
+			Username string `json:"username" binding:"required"`
+			Email    string `json:"email" binding:"required"`
+			Password string `json:"password" binding:"required,min=6"`
+		}
 
-			if err := c.ShouldBindJSON(&adminData); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			// Check if user already exists
-			var existingUser models.User
-			if err := database.DB.Where("username = ? OR email = ?", adminData.Username, adminData.Email).First(&existingUser).Error; err == nil {
-				c.JSON(http.StatusConflict, gin.H{"error": "User with this username or email already exists"})
-				return
-			}
-
-			// Hash the password
-			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminData.Password), bcrypt.DefaultCost)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
-				return
-			}
-
-			// Create new admin user
-			newAdmin := models.User{
-				Username: adminData.Username,
-				Email:    adminData.Email,
-				Password: string(hashedPassword),
-				Role:     models.RoleAdmin, // Explicitly set to admin role
-			}
-
-			if err := database.DB.Create(&newAdmin).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create admin user"})
-				return
-			}
-
-			c.JSON(http.StatusCreated, gin.H{
-				"message":  "Admin user created successfully",
-				"username": newAdmin.Username,
-				"role":     string(newAdmin.Role),
-			})
-		})
-		session.LastActivity = time.Now()
-		database.DB.Save(&session)
-
-		// Generate new access token (reusing the same refresh token)
-		newAccessToken, err := generateAccessToken(user.ID, user.Username, string(user.Role), uint(session.ID), session.RefreshToken)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate new access token"})
+		if err := c.ShouldBindJSON(&adminData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"access_token": newAccessToken,
-			"expires_in":   int64(AccessTokenExpiry.Seconds()),
-			"role":         "user",
-			"username":     user.Username,
+		// Check if user already exists
+		var existingUser models.User
+		if err := database.DB.Where("username = ? OR email = ?", adminData.Username, adminData.Email).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "User with this username or email already exists"})
+			return
+		}
+
+		// Hash the password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminData.Password), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash password"})
+			return
+		}
+
+		// Create new admin user
+		newAdmin := models.User{
+			Username: adminData.Username,
+			Email:    adminData.Email,
+			Password: string(hashedPassword),
+			Role:     models.RoleAdmin, // Explicitly set to admin role
+		}
+
+		if err := database.DB.Create(&newAdmin).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create admin user"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{
+			"message":  "Admin user created successfully",
+			"username": newAdmin.Username,
+			"role":     string(newAdmin.Role),
 		})
 	})
 
