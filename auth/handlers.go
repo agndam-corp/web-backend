@@ -15,6 +15,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// @title Webapp API
+// @version 1.0
+// @description VPN Control Panel API
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.url http://www.swagger.io/support
+// @contact.email support@swagger.io
+
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host api.djasko.com
+// @BasePath /api/v1
+// @schemes https
+
 // TokenClaims represents JWT access token claims
 type TokenClaims struct {
 	Username     string `json:"username"`
@@ -49,7 +65,19 @@ type LoginResponse struct {
 	Username     string `json:"username"`
 }
 
-// Login handles user login
+// Login	godoc
+// @Summary User login
+// @Description Authenticate user and return JWT tokens
+// @Tags Authentication
+// @Accept json
+// @Produce json
+// @Param username body string true "Username"
+// @Param password body string true "Password"
+// @Success 200 {object} LoginResponse "Successful login with tokens"
+// @Failure 400 {object} ErrorResponse "Invalid request format"
+// @Failure 401 {object} ErrorResponse "Invalid credentials"
+// @Failure 500 {object} ErrorResponse "Server error"
+// @Router /auth/login [post]
 func Login(c *gin.Context) {
 	log.Printf("Login request received from: %s", c.ClientIP())
 	
@@ -96,8 +124,7 @@ func Login(c *gin.Context) {
 	log.Printf("Login successful for user: %s, tokens generated", user.Username)
 }
 
-// Register handles user registration
-func Register(c *gin.Context) {
+// Register\tgodoc\n// @Summary User registration\n// @Description Register a new user account\n// @Tags Authentication\n// @Accept json\n// @Produce json\n// @Param registerInfo body struct{Username string \"json:\\\"username\\\"\";Email string \"json:\\\"email\\\"\";Password string \"json:\\\"password\\\"\"} true \"Registration info\"\n// @Success 201 {object} SuccessResponse \"User registered successfully\"\n// @Failure 400 {object} ErrorResponse \"Invalid request format\"\n// @Failure 409 {object} ErrorResponse \"User already exists\"\n// @Failure 500 {object} ErrorResponse \"Server error\"\n// @Router /auth/register [post]\nfunc Register(c *gin.Context) {\n
 	var userData struct {
 		Username string `json:"username" binding:"required"`
 		Email    string `json:"email" binding:"required"`
@@ -143,8 +170,7 @@ func Register(c *gin.Context) {
 	})
 }
 
-// RefreshToken handles token refresh
-func RefreshToken(c *gin.Context) {
+// RefreshToken\tgodoc\n// @Summary Refresh JWT token\n// @Description Refresh access token using refresh token\n// @Tags Authentication\n// @Accept json\n// @Produce json\n// @Param tokenInfo body struct{RefreshToken string \"json:\\\"refresh_token\\\"\"} true \"Refresh token info\"\n// @Success 200 {object} LoginResponse \"New tokens returned\"\n// @Failure 400 {object} ErrorResponse \"Invalid request format\"\n// @Failure 401 {object} ErrorResponse \"Invalid refresh token\"\n// @Failure 500 {object} ErrorResponse \"Server error\"\n// @Router /auth/refresh [post]\nfunc RefreshToken(c *gin.Context) {\n\tvar req struct {\n\t\tRefreshToken string `json:\"refresh_token\"`\n\t}\n\n\tif err := c.ShouldBindJSON(&req); err != nil {\n\t\tc.JSON(http.StatusBadRequest, ErrorResponse{Error: \"Invalid request format\"})\n\t\treturn\n\t}\n\n\t// Validate refresh token\n\tclaims, err := utils.ParseRefreshToken(req.RefreshToken)\n\tif err != nil {\n\t\tc.JSON(http.StatusUnauthorized, ErrorResponse{Error: \"Invalid refresh token\"})\n\t\treturn\n\t}\n\n\t// Generate new tokens\n\tuserID := claims.UserID\n\tnewAccessToken, newRefreshToken, err := utils.GenerateTokens(userID)\n\tif err != nil {\n\t\tc.JSON(http.StatusInternalServerError, ErrorResponse{Error: \"Server error\"})\n\t\treturn\n\t}\n\n\t// Update refresh token in database\n\tif err := database.UpdateRefreshToken(userID, newRefreshToken); err != nil {\n\t\tc.JSON(http.StatusInternalServerError, ErrorResponse{Error: \"Server error\"})\n\t\treturn\n\t}\n\n\tc.JSON(http.StatusOK, LoginResponse{\n\t\tAccessToken:  newAccessToken,\n\t\tTokenType:    \"Bearer\",\n\t\tRefreshToken: newRefreshToken,\n\t})\n}
 	var refreshTokenReq struct {
 		RefreshToken string `json:"refresh_token"`
 	}

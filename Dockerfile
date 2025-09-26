@@ -14,7 +14,7 @@ RUN go mod tidy
 # Build binary with cached builds
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+    CGO_ENABLED=0 GOOS=linux go build -o main .
 
 # Final stage
 FROM alpine:3.20

@@ -4,6 +4,8 @@ import (
 	"log"
 	"os"
 
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/gin-gonic/gin"
 	"github.com/yourusername/webapp-backend/auth"
 	"github.com/yourusername/webapp-backend/aws"
@@ -55,6 +57,9 @@ func main() {
 
 	// Setup routes
 	routes.SetupRoutes(router)
+
+	// Swagger UI
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Start the server
 	port := os.Getenv("PORT")
