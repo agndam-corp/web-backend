@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/yourusername/webapp-backend/models"
 	"gorm.io/driver/mysql"
@@ -46,6 +47,12 @@ func InitDB() {
 }
 
 func Migrate() error {
+	// First, handle any foreign key constraints that might prevent column modifications
+	// Specifically handle the sessions.user_id foreign key constraint issue
+	if err := handleForeignKeyConstraints(); err != nil {
+		return fmt.Errorf("error handling foreign key constraints: %v", err)
+	}
+
 	// Auto-migrate the schema
 	err := DB.AutoMigrate(&models.User{}, &models.Session{})
 	if err != nil {
@@ -54,6 +61,47 @@ func Migrate() error {
 
 	log.Println("Database migration completed successfully")
 	return nil
+}
+
+// handleForeignKeyConstraints handles foreign key constraints that might prevent column modifications
+func handleForeignKeyConstraints() error {
+	// Check if foreign key exists and drop it temporarily if needed
+	// This is needed because MySQL/MariaDB prevents modifying columns that are part of foreign key constraints
+	var result *gorm.DB
+	
+	// Attempt to drop the foreign key constraint if it exists
+	// The constraint name follows MySQL/MariaDB naming convention
+	result = DB.Exec("ALTER TABLE `sessions` DROP FOREIGN KEY `sessions_ibfk_1`")
+	
+	// Check if the error indicates the foreign key doesn't exist (which is fine)
+	if result.Error != nil && !isForeignKeyDoesNotExistError(result.Error) {
+		return result.Error
+	}
+	
+	return nil
+}
+
+// isForeignKeyDoesNotExistError checks if the error is related to foreign key not existing
+func isForeignKeyDoesNotExistError(err error) bool {
+	errStr := err.Error()
+	// Check for error indicating foreign key doesn't exist
+	// Different MySQL/MariaDB versions may have different messages
+	return containsAny(errStr, []string{
+		"Check that column/key exists",
+		"key does not exist",
+		"foreign key constraint does not exist",
+		"errno 1091", // MySQL error code for "Can't DROP"
+	})
+}
+
+// containsAny checks if string contains any of the substrings
+func containsAny(s string, substrings []string) bool {
+	for _, sub := range substrings {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func getEnv(key, defaultValue string) string {
