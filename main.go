@@ -82,8 +82,8 @@ func authMiddleware(c *gin.Context) {
 	}
 	
 	// Verify that the session belongs to the expected user (if subject is set)
-	if claims.StandardClaims.Subject != "" {
-		expectedUserID, err := strconv.ParseUint(claims.StandardClaims.Subject, 10, 32)
+	if claims.RegisteredClaims.Subject != "" {
+		expectedUserID, err := strconv.ParseUint(claims.RegisteredClaims.Subject, 10, 32)
 		if err == nil && uint(expectedUserID) != session.UserID {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Session does not belong to user"})
 			c.Abort()
@@ -433,7 +433,7 @@ func main() {
 		database.DB.Save(&session)
 
 		// Generate new access token (reusing the same refresh token)
-		newAccessToken, err := generateAccessToken(user.Username, "user", uint(session.ID), session.RefreshToken)
+		newAccessToken, err := generateAccessToken(user.ID, user.Username, string(user.Role), uint(session.ID), session.RefreshToken)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate new access token"})
 			return
