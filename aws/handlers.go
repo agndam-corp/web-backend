@@ -32,19 +32,19 @@ func InitAWS() {
 	// Load client certificate and key for IAM Roles Anywhere
 	certFile := "/etc/ssl/certs/webapp/tls.crt"
 	keyFile := "/etc/ssl/certs/webapp/tls.key"
-	
+
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		log.Fatalf("Failed to load client certificate: %v", err)
 	}
-	
+
 	// Load CA certificate
 	caCertFile := "/etc/ssl/certs/webapp/ca.crt"
 	caCert, err := ioutil.ReadFile(caCertFile)
 	if err != nil {
 		log.Fatalf("Failed to read CA certificate: %v", err)
 	}
-	
+
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 

@@ -61,7 +61,7 @@ func Migrate() error {
 	if err := DB.AutoMigrate(&models.User{}); err != nil {
 		return fmt.Errorf("error migrating User table: %v", err)
 	}
-	
+
 	// Then migrate the Session table
 	if err := DB.AutoMigrate(&models.Session{}); err != nil {
 		return fmt.Errorf("error migrating Session table: %v", err)

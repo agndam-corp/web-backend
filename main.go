@@ -4,9 +4,9 @@ import (
 	"log"
 	"os"
 
+	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"github.com/gin-gonic/gin"
 	"github.com/yourusername/webapp-backend/auth"
 	"github.com/yourusername/webapp-backend/aws"
 	"github.com/yourusername/webapp-backend/database"
@@ -43,15 +43,15 @@ func main() {
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With")
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", "86400")
-		
+
 		log.Printf("CORS headers set for origin: %s, method: %s", origin, c.Request.Method)
-		
+
 		if c.Request.Method == "OPTIONS" {
 			log.Printf("Handling preflight request for: %s", c.Request.URL.Path)
 			c.AbortWithStatus(204)
 			return
 		}
-		
+
 		c.Next()
 	})
 
@@ -66,7 +66,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	
+
 	log.Printf("Starting server on port %s", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)

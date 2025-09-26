@@ -18,7 +18,7 @@ import (
 func AuthMiddleware(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
 	log.Printf("Auth middleware: Authorization header: %s", authHeader)
-	
+
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 		log.Printf("Auth middleware: Missing or invalid authorization header")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing or invalid"})
@@ -61,7 +61,7 @@ func AuthMiddleware(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	
+
 	// Verify that the session belongs to the expected user (if subject is set)
 	if claims.RegisteredClaims.Subject != "" {
 		expectedUserID, err := strconv.ParseUint(claims.RegisteredClaims.Subject, 10, 32)
@@ -96,7 +96,7 @@ func AdminMiddleware(c *gin.Context) {
 
 	role, exists := c.Get("role")
 	log.Printf("Admin middleware: User role check - Role: %v, Exists: %t", role, exists)
-	
+
 	if !exists || role != string(models.RoleAdmin) {
 		log.Printf("Admin middleware: Access denied - User role: %v, Required: admin", role)
 		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})

@@ -15,21 +15,41 @@ import (
 	"gorm.io/gorm"
 )
 
-// @title Webapp API
-// @version 1.0
-// @description VPN Control Panel API
-// @termsOfService http://swagger.io/terms/
+//	@title			Webapp API
+//	@version		1.0
+//	@description	VPN Control Panel API
+//	@termsOfService	http://swagger.io/terms/
 
-// @contact.name API Support
-// @contact.url http://www.swagger.io/support
-// @contact.email support@swagger.io
+//	@contact.name	API Support
+//	@contact.url	http://www.swagger.io/support
+//	@contact.email	support@swagger.io
 
-// @license.name Apache 2.0
-// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+//	@license.name	Apache 2.0
+//	@license.url	http://www.apache.org/licenses/LICENSE-2.0.html
 
-// @host api.djasko.com
-// @BasePath /api/v1
-// @schemes https
+//	@host		api.djasko.com
+//	@BasePath	/
+//	@schemes	https
+
+// LoginResponse represents the response for login requests
+type LoginResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+	Role         string `json:"role"`
+	Username     string `json:"username"`
+}
+
+// ErrorResponse represents a standard error response
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// SuccessResponse represents a standard success response
+type SuccessResponse struct {
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
 
 // TokenClaims represents JWT access token claims
 type TokenClaims struct {
@@ -56,31 +76,23 @@ func GetJWTKey() []byte {
 	return jwtKey
 }
 
-// LoginResponse represents the response for login requests
-type LoginResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
-	Role         string `json:"role"`
-	Username     string `json:"username"`
-}
-
-// Login	godoc
-// @Summary User login
-// @Description Authenticate user and return JWT tokens
-// @Tags Authentication
-// @Accept json
-// @Produce json
-// @Param username body string true "Username"
-// @Param password body string true "Password"
-// @Success 200 {object} LoginResponse "Successful login with tokens"
-// @Failure 400 {object} ErrorResponse "Invalid request format"
-// @Failure 401 {object} ErrorResponse "Invalid credentials"
-// @Failure 500 {object} ErrorResponse "Server error"
-// @Router /auth/login [post]
+// Login handles user login
+//
+//	@Summary		User login
+//	@Description	Authenticate user and return JWT tokens
+//	@Tags			Authentication
+//	@Accept			json
+//	@Produce		json
+//	@Param			username	body		string			true	"Username"
+//	@Param			password	body		string			true	"Password"
+//	@Success		200			{object}	LoginResponse	"Successful login with tokens"
+//	@Failure		400			{object}	ErrorResponse	"Invalid request format"
+//	@Failure		401			{object}	ErrorResponse	"Invalid credentials"
+//	@Failure		500			{object}	ErrorResponse	"Server error"
+//	@Router			/auth/login [post]
 func Login(c *gin.Context) {
 	log.Printf("Login request received from: %s", c.ClientIP())
-	
+
 	var credentials struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -93,7 +105,7 @@ func Login(c *gin.Context) {
 	}
 
 	log.Printf("Attempting authentication for user: %s", credentials.Username)
-	
+
 	user, authenticated := AuthenticateUser(credentials.Username, credentials.Password)
 	if !authenticated {
 		log.Printf("Authentication failed for user: %s", credentials.Username)
@@ -102,7 +114,7 @@ func Login(c *gin.Context) {
 	}
 
 	log.Printf("Authentication successful for user: %s", credentials.Username)
-	
+
 	// Generate access token and refresh token
 	accessToken, refreshToken, err := GenerateTokens(user)
 	if err != nil {
@@ -120,11 +132,26 @@ func Login(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
-	
+
 	log.Printf("Login successful for user: %s, tokens generated", user.Username)
 }
 
-// Register\tgodoc\n// @Summary User registration\n// @Description Register a new user account\n// @Tags Authentication\n// @Accept json\n// @Produce json\n// @Param registerInfo body struct{Username string \"json:\\\"username\\\"\";Email string \"json:\\\"email\\\"\";Password string \"json:\\\"password\\\"\"} true \"Registration info\"\n// @Success 201 {object} SuccessResponse \"User registered successfully\"\n// @Failure 400 {object} ErrorResponse \"Invalid request format\"\n// @Failure 409 {object} ErrorResponse \"User already exists\"\n// @Failure 500 {object} ErrorResponse \"Server error\"\n// @Router /auth/register [post]\nfunc Register(c *gin.Context) {\n
+// Register handles user registration
+//
+//	@Summary		User registration
+//	@Description	Register a new user account
+//	@Tags			Authentication
+//	@Accept			json
+//	@Produce		json
+//	@Param			username	body		string			true	"Username"
+//	@Param			email		body		string			true	"Email"
+//	@Param			password	body		string			true	"Password"
+//	@Success		201			{object}	SuccessResponse	"User registered successfully"
+//	@Failure		400			{object}	ErrorResponse	"Invalid request format"
+//	@Failure		409			{object}	ErrorResponse	"User already exists"
+//	@Failure		500			{object}	ErrorResponse	"Server error"
+//	@Router			/auth/register [post]
+func Register(c *gin.Context) {
 	var userData struct {
 		Username string `json:"username" binding:"required"`
 		Email    string `json:"email" binding:"required"`
@@ -170,7 +197,20 @@ func Login(c *gin.Context) {
 	})
 }
 
-// RefreshToken\tgodoc\n// @Summary Refresh JWT token\n// @Description Refresh access token using refresh token\n// @Tags Authentication\n// @Accept json\n// @Produce json\n// @Param tokenInfo body struct{RefreshToken string \"json:\\\"refresh_token\\\"\"} true \"Refresh token info\"\n// @Success 200 {object} LoginResponse \"New tokens returned\"\n// @Failure 400 {object} ErrorResponse \"Invalid request format\"\n// @Failure 401 {object} ErrorResponse \"Invalid refresh token\"\n// @Failure 500 {object} ErrorResponse \"Server error\"\n// @Router /auth/refresh [post]\nfunc RefreshToken(c *gin.Context) {\n\tvar req struct {\n\t\tRefreshToken string `json:\"refresh_token\"`\n\t}\n\n\tif err := c.ShouldBindJSON(&req); err != nil {\n\t\tc.JSON(http.StatusBadRequest, ErrorResponse{Error: \"Invalid request format\"})\n\t\treturn\n\t}\n\n\t// Validate refresh token\n\tclaims, err := utils.ParseRefreshToken(req.RefreshToken)\n\tif err != nil {\n\t\tc.JSON(http.StatusUnauthorized, ErrorResponse{Error: \"Invalid refresh token\"})\n\t\treturn\n\t}\n\n\t// Generate new tokens\n\tuserID := claims.UserID\n\tnewAccessToken, newRefreshToken, err := utils.GenerateTokens(userID)\n\tif err != nil {\n\t\tc.JSON(http.StatusInternalServerError, ErrorResponse{Error: \"Server error\"})\n\t\treturn\n\t}\n\n\t// Update refresh token in database\n\tif err := database.UpdateRefreshToken(userID, newRefreshToken); err != nil {\n\t\tc.JSON(http.StatusInternalServerError, ErrorResponse{Error: \"Server error\"})\n\t\treturn\n\t}\n\n\tc.JSON(http.StatusOK, LoginResponse{\n\t\tAccessToken:  newAccessToken,\n\t\tTokenType:    \"Bearer\",\n\t\tRefreshToken: newRefreshToken,\n\t})\n}
+// RefreshToken handles token refresh
+//
+//	@Summary		Refresh JWT token
+//	@Description	Refresh access token using refresh token
+//	@Tags			Authentication
+//	@Accept			json
+//	@Produce		json
+//	@Param			refresh_token	body		string			true	"Refresh token"
+//	@Success		200				{object}	LoginResponse	"New tokens returned"
+//	@Failure		400				{object}	ErrorResponse	"Invalid request format"
+//	@Failure		401				{object}	ErrorResponse	"Invalid refresh token"
+//	@Failure		500				{object}	ErrorResponse	"Server error"
+//	@Router			/auth/refresh [post]
+func RefreshToken(c *gin.Context) {
 	var refreshTokenReq struct {
 		RefreshToken string `json:"refresh_token"`
 	}
@@ -239,6 +279,29 @@ func Login(c *gin.Context) {
 	})
 }
 
+// AuthenticateUser authenticates a user against the database
+func AuthenticateUser(username, password string) (*models.User, bool) {
+	var user models.User
+
+	// Find user by username or email
+	result := database.DB.Where("username = ? OR email = ?", username, username).First(&user)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, false
+		}
+		log.Printf("Error querying user: %v", result.Error)
+		return nil, false
+	}
+
+	// Compare the provided password with the hashed password
+	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+	if err != nil {
+		return nil, false
+	}
+
+	return &user, true
+}
+
 // GenerateTokens generates both access and refresh tokens
 func GenerateTokens(user *models.User) (string, string, error) {
 	// Generate a unique refresh token
@@ -291,29 +354,6 @@ func GenerateAccessToken(userID uint, username, role string, sessionID uint, ref
 	}
 
 	return tokenString, nil
-}
-
-// AuthenticateUser authenticates a user against the database
-func AuthenticateUser(username, password string) (*models.User, bool) {
-	var user models.User
-
-	// Find user by username or email
-	result := database.DB.Where("username = ? OR email = ?", username, username).First(&user)
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return nil, false
-		}
-		log.Printf("Error querying user: %v", result.Error)
-		return nil, false
-	}
-
-	// Compare the provided password with the hashed password
-	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
-	if err != nil {
-		return nil, false
-	}
-
-	return &user, true
 }
 
 // SessionTimeout defines how long a user can be inactive before being logged out
