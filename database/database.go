@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/yourusername/webapp-backend/models"
 	"gorm.io/driver/mysql"
