@@ -73,3 +73,46 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: ${{ github.event_name != 'pull_request' }}
+
+  update-kustomization:
+    runs-on: ubuntu-latest
+    needs: build-and-push-image
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+    steps:
+      - name: Get image tag
+        id: image-tag
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout server-one repository
+        uses: actions/checkout@v4
+        with:
+          repository: agndam-corp/server-one
+          token: ${{ secrets.ADMIN_TOKEN }}
+          path: server-one
+
+      - name: Update image tag in kustomization.yaml
+        run: |
+          cd server-one/apps/webapp/backend
+          NEW_TAG="${{ steps.image-tag.outputs.tag }}"
+          sed -i "s/newTag: .*/newTag: $NEW_TAG/" kustomization.yaml
+
+      - name: Commit and push changes
+        run: |
+          cd server-one
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add apps/webapp/backend/kustomization.yaml
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            COMMIT_MSG="Update webapp-backend image tag to ${{ steps.image-tag.outputs.tag }}"
+            git commit -m "$COMMIT_MSG"
+            git push
+          fi
