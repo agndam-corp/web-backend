@@ -48,42 +48,57 @@ func InitDB() {
 
 func Migrate() error {
 	// The issue occurs when GORM tries to change column type with foreign key constraint
-	// To safely handle this, we need to drop foreign key constraints, 
-	// perform the migration, and let GORM recreate the constraints properly
+	// To safely handle this, we'll check the current schema and handle migrations carefully
 	
-	// Get GORM's migrator instance
 	migrator := DB.Migrator()
 	
-	// Check if sessions table exists
+	// Check if the sessions table exists
 	sessionsTableExists := migrator.HasTable(&models.Session{})
 	
 	if sessionsTableExists {
-		// If sessions table exists, we may need to handle existing foreign keys
-		// Try to drop the foreign key constraint temporarily
-		// Check if foreign key exists first
-		var fkExists int64
+		// If the sessions table already exists, we need to handle potential column type mismatches
+		// First, check if the user_id column has the expected type
+		
+		// Get column information for user_id
+		var columnInfo []map[string]interface{}
 		DB.Raw(`
-			SELECT COUNT(*) 
-			FROM information_schema.KEY_COLUMN_USAGE 
-			WHERE TABLE_SCHEMA = DATABASE() 
-			AND TABLE_NAME = 'sessions' 
-			AND REFERENCED_TABLE_NAME = 'users'
-			AND CONSTRAINT_NAME = 'sessions_ibfk_1'`).Scan(&fkExists)
-
-		if fkExists > 0 {
-			// Drop the foreign key constraint before migration
-			if err := DB.Exec("ALTER TABLE `sessions` DROP FOREIGN KEY `sessions_ibfk_1`").Error; err != nil {
-				// If constraint doesn't exist now (race condition), continue
-				if !strings.Contains(err.Error(), "check that it exists") {
-					log.Printf("Warning: could not drop foreign key: %v", err)
-				}
+			SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, EXTRA
+			FROM information_schema.COLUMNS 
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sessions' AND COLUMN_NAME = 'user_id'
+		`).Scan(&columnInfo)
+		
+		if len(columnInfo) > 0 {
+			// The column exists, check its type
+			log.Printf("Current user_id column info: %+v", columnInfo[0])
+			
+			// Since the error indicates GORM wants to change to 'bigint unsigned NOT NULL'
+			// We'll try a different approach: temporarily disable foreign key checks
+			if err := DB.Exec("SET FOREIGN_KEY_CHECKS = 0").Error; err != nil {
+				return fmt.Errorf("error disabling foreign key checks: %v", err)
+			}
+			
+			// Perform the migration with foreign key checks disabled
+			if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
+				// Re-enable foreign key checks before returning error
+				DB.Exec("SET FOREIGN_KEY_CHECKS = 1")
+				return fmt.Errorf("error migrating database: %v", err)
+			}
+			
+			// Re-enable foreign key checks
+			if err := DB.Exec("SET FOREIGN_KEY_CHECKS = 1").Error; err != nil {
+				log.Printf("Warning: error re-enabling foreign key checks: %v", err)
+			}
+		} else {
+			// Column doesn't exist, safe to migrate normally
+			if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
+				return fmt.Errorf("error migrating database: %v", err)
 			}
 		}
-	}
-
-	// Now run the auto-migration which will handle column types and recreate constraints
-	if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
-		return fmt.Errorf("error migrating database: %v", err)
+	} else {
+		// If table doesn't exist, normal migration is safe
+		if err := DB.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
+			return fmt.Errorf("error migrating database: %v", err)
+		}
 	}
 
 	log.Println("Database migration completed successfully")
