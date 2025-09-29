@@ -157,71 +157,25 @@ func createEC2ClientForRegion(region string) (*ec2.Client, error) {
 	return ec2Client, nil
 }
 
-// InitAWS initializes AWS clients with IAM Roles Anywhere support
+// InitAWS initializes AWS clients with support for credential chain including IAM Roles Anywhere
 func InitAWS() {
 	// Get the default instance ID and region from environment variable
 	defaultInstanceID = os.Getenv("VPN_INSTANCE_ID")
 	defaultRegion = os.Getenv("AWS_REGION")
 
-	// Load client certificate and key for IAM Roles Anywhere
-	certFile := "/etc/ssl/certs/webapp/tls.crt"
-	keyFile := "/etc/ssl/certs/webapp/tls.key"
-
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		log.Fatalf("Failed to load client certificate: %v", err)
-	}
-
-	// Load CA certificate
-	caCertFile := "/etc/ssl/certs/webapp/ca.crt"
-	caCert, err := ioutil.ReadFile(caCertFile)
-	if err != nil {
-		log.Fatalf("Failed to read CA certificate: %v", err)
-	}
-
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	// Create custom HTTP client with client certificate for IAM Roles Anywhere
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				RootCAs:      caCertPool,
-			},
-		},
-	}
-
-	// Load AWS configuration with IAM Roles Anywhere support
+	// Load AWS configuration using the default credential chain
+	// This will automatically use the AWS config file if AWS_PROFILE is set
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(defaultRegion),
-		config.WithHTTPClient(httpClient),
 	)
 	if err != nil {
 		log.Fatalf("Failed to load AWS SDK config: %v", err)
 	}
 
-	// Create STS client with the custom HTTP client
-	stsClient := sts.NewFromConfig(cfg, func(o *sts.Options) {
-		o.HTTPClient = httpClient
-	})
-
-	// Create credentials using IAM Roles Anywhere
-	// The role ARN should be set in environment variable or defaults to IAM Roles Anywhere profile
-	roleARN := os.Getenv("IAM_ROLE_ARN")
-	if roleARN == "" {
-		// If no role ARN is specified, we'll use the default credential chain which should work for IAM Roles Anywhere
-		// But we still need to ensure we're using the custom HTTP client
-	} else {
-		// Create credentials using STS AssumeRole with the specified role ARN
-		creds := stscreds.NewAssumeRoleProvider(stsClient, roleARN)
-		// Update the config with new credentials
-		cfg.Credentials = aws.NewCredentialsCache(creds)
-	}
-
 	// Store the config for later use with different regions
 	defaultConfig = cfg
-	defaultHTTPClient = httpClient
+	// Use the default HTTP client from the config
+	defaultHTTPClient = &http.Client{}
 }
 
 // StartInstance	godoc
