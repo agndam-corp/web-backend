@@ -1,18 +1,24 @@
+```dockerfile
 FROM alpine:3.20
+
+# Install required packages
 RUN apk --no-cache add ca-certificates curl bash
 
 WORKDIR /root/
 
-# Install aws-signing-helper from GitHub releases for linux
-RUN ARCH="amd64"; \
-    curl -sL https://github.com/aws/aws-signing-helper/releases/latest/download/aws_signing_helper_linux_$ARCH -o aws_signing_helper && \
-    chmod +x aws_signing_helper && \
-    mv aws_signing_helper /usr/local/bin/
+# Install aws_signing_helper from AWS Roles Anywhere release
+ENV AWS_SIGNING_HELPER_VERSION=1.7.1
+RUN ARCH="X86_64" && \
+    curl -sL "https://rolesanywhere.amazonaws.com/releases/${AWS_SIGNING_HELPER_VERSION}/${ARCH}/Linux/alpine/aws_signing_helper" -o /usr/local/bin/aws_signing_helper && \
+    chmod +x /usr/local/bin/aws_signing_helper
 
 # Create .aws directory
-RUN mkdir -p ~/.aws
+RUN mkdir -p /root/.aws
 
+# Copy your application binary
 COPY main .
 
 EXPOSE 8080
+
 CMD ["./main"]
+```
