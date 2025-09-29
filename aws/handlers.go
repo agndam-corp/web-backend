@@ -304,9 +304,11 @@ func StartInstance(c *gin.Context) {
 
 	log.Printf("Start instance result: %v", result)
 	if len(result.StartingInstances) > 0 {
-		// Update the status in the database
-		dbInstance.Status = string(result.StartingInstances[0].CurrentState.Name)
-		database.DB.Save(&dbInstance)
+		// Update only the status in the database
+		if err := database.DB.Model(&dbInstance).Update("Status", string(result.StartingInstances[0].CurrentState.Name)).Error; err != nil {
+			log.Printf("Failed to update instance status in database: %v", err)
+			// Continue anyway, just log the error
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":    "Instance start command sent",
@@ -404,9 +406,11 @@ func StopInstance(c *gin.Context) {
 
 	log.Printf("Stop instance result: %v", result)
 	if len(result.StoppingInstances) > 0 {
-		// Update the status in the database
-		dbInstance.Status = string(result.StoppingInstances[0].CurrentState.Name)
-		database.DB.Save(&dbInstance)
+		// Update only the status in the database
+		if err := database.DB.Model(&dbInstance).Update("Status", string(result.StoppingInstances[0].CurrentState.Name)).Error; err != nil {
+			log.Printf("Failed to update instance status in database: %v", err)
+			// Continue anyway, just log the error
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":    "Instance stop command sent",
@@ -506,9 +510,11 @@ func GetInstanceStatus(c *gin.Context) {
 	}
 
 	instanceState := result.Reservations[0].Instances[0].State.Name
-	// Update the status in the database
-	dbInstance.Status = string(instanceState)
-	database.DB.Save(&dbInstance)
+	// Update only the status in the database
+	if err := database.DB.Model(&dbInstance).Update("Status", string(instanceState)).Error; err != nil {
+		log.Printf("Failed to update instance status in database: %v", err)
+		// Continue anyway, just log the error
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"state":  string(instanceState),
