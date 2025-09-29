@@ -114,6 +114,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/agndam-corp/web-backend/database"
@@ -529,14 +530,22 @@ func GetInstances(c *gin.Context) {
 	var instances []models.AWSInstance
 
 	// Get user ID from context to filter instances they created
-	userID, exists := c.Get("userId")
+	userIDStr, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
 		return
 	}
 
+	// Convert user ID from string to uint
+	userID, err := strconv.ParseUint(userIDStr.(string), 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse user ID: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
 	// Query instances from database - only return instances created by the current user
-	if err := database.DB.Where("created_by = ?", userID).Find(&instances).Error; err != nil {
+	if err := database.DB.Where("created_by = ?", uint(userID)).Find(&instances).Error; err != nil {
 		log.Printf("Failed to fetch AWS instances: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch instances"})
 		return
@@ -557,10 +566,18 @@ func GetInstances(c *gin.Context) {
 //	@Failure		500	{object}	types.ErrorResponse	"Failed to fetch instance"
 //	@Router			/instances/{id} [get]
 func GetInstance(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	
+	// Convert the ID parameter to uint
+	id, err := strconv.ParseUint(idParam, 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse instance ID: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid instance ID"})
+		return
+	}
 
 	var instance models.AWSInstance
-	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+	if err := database.DB.First(&instance, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
 			return
@@ -593,12 +610,20 @@ func CreateInstance(c *gin.Context) {
 	}
 
 	// Get user ID from context
-	userID, exists := c.Get("userId")
+	userIDStr, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
 		return
 	}
-	req.CreatedBy = userID.(uint)
+
+	// Convert user ID from string to uint
+	userID, err := strconv.ParseUint(userIDStr.(string), 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse user ID: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+	req.CreatedBy = uint(userID)
 
 	// Validate required fields
 	if req.InstanceID == "" || req.Region == "" {
@@ -638,10 +663,18 @@ func CreateInstance(c *gin.Context) {
 //	@Failure		500			{object}	types.ErrorResponse	"Failed to update instance"
 //	@Router			/instances/{id} [put]
 func UpdateInstance(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	
+	// Convert the ID parameter to uint
+	id, err := strconv.ParseUint(idParam, 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse instance ID: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid instance ID"})
+		return
+	}
 
 	var instance models.AWSInstance
-	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+	if err := database.DB.First(&instance, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
 			return
@@ -683,10 +716,18 @@ func UpdateInstance(c *gin.Context) {
 //	@Failure		500	{object}	types.ErrorResponse	"Failed to delete instance"
 //	@Router			/instances/{id} [delete]
 func DeleteInstance(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	
+	// Convert the ID parameter to uint
+	id, err := strconv.ParseUint(idParam, 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse instance ID: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid instance ID"})
+		return
+	}
 
 	var instance models.AWSInstance
-	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+	if err := database.DB.First(&instance, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
 			return
@@ -697,13 +738,21 @@ func DeleteInstance(c *gin.Context) {
 	}
 
 	// Verify that the current user owns this instance (for non-admin users)
-	userID, exists := c.Get("userId")
+	userIDStr, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
 		return
 	}
 
-	if instance.CreatedBy != userID.(uint) {
+	// Convert user ID from string to uint
+	userID, err := strconv.ParseUint(userIDStr.(string), 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse user ID: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	if instance.CreatedBy != uint(userID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own instances"})
 		return
 	}
@@ -751,12 +800,20 @@ func AdminCreateInstance(c *gin.Context) {
 
 	// Admin can create instance for any user, default to admin's user ID if not specified
 	if req.CreatedBy == 0 {
-		adminUserID, exists := c.Get("userId")
+		adminUserIDStr, exists := c.Get("userId")
 		if !exists {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
 			return
 		}
-		req.CreatedBy = adminUserID.(uint)
+		
+		// Convert user ID from string to uint
+		adminUserID, err := strconv.ParseUint(adminUserIDStr.(string), 10, 32)
+		if err != nil {
+			log.Printf("Failed to parse user ID: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+			return
+		}
+		req.CreatedBy = uint(adminUserID)
 	}
 
 	// Create the instance in the database
@@ -784,10 +841,18 @@ func AdminCreateInstance(c *gin.Context) {
 //	@Failure		500			{object}	types.ErrorResponse	"Failed to update instance"
 //	@Router			/admin/instances/{id} [put]
 func AdminUpdateInstance(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	
+	// Convert the ID parameter to uint
+	id, err := strconv.ParseUint(idParam, 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse instance ID: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid instance ID"})
+		return
+	}
 
 	var instance models.AWSInstance
-	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+	if err := database.DB.First(&instance, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
 			return
@@ -830,10 +895,18 @@ func AdminUpdateInstance(c *gin.Context) {
 //	@Failure		500	{object}	types.ErrorResponse	"Failed to delete instance"
 //	@Router			/admin/instances/{id} [delete]
 func AdminDeleteInstance(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	
+	// Convert the ID parameter to uint
+	id, err := strconv.ParseUint(idParam, 10, 32)
+	if err != nil {
+		log.Printf("Failed to parse instance ID: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid instance ID"})
+		return
+	}
 
 	var instance models.AWSInstance
-	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+	if err := database.DB.First(&instance, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
 			return
