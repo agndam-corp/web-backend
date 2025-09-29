@@ -1,3 +1,108 @@
+/*
+Package aws provides AWS EC2 instance management functionality.
+
+This package handles the management of AWS EC2 instances including:
+- Starting, stopping, and checking the status of EC2 instances
+- Managing instance configurations in the database
+- Supporting multi-region AWS operations
+- Providing admin-level instance management capabilities
+
+# API Endpoints
+
+## Instance Operations
+
+### Start Instance
+
+	POST /start
+	Starts an EC2 instance. Accepts instanceId and region in request body.
+
+### Stop Instance
+
+	POST /stop
+	Stops an EC2 instance. Accepts instanceId and region in request body.
+
+### Get Instance Status
+
+	GET /status?instanceId=...&region=...
+	Gets the status of an EC2 instance. Accepts instanceId and region as query parameters.
+
+## Instance Management
+
+### List Instances (User)
+
+	GET /instances
+	Get all instances owned by the current user.
+
+### Get Instance (User)
+
+	GET /instances/:id
+	Get a specific instance by ID.
+
+### Create Instance (User)
+
+	POST /instances
+	Create a new instance configuration.
+
+### Update Instance (User)
+
+	PUT /instances/:id
+	Update an existing instance configuration.
+
+### Delete Instance (User)
+
+	DELETE /instances/:id
+	Delete an instance configuration.
+
+## Admin Instance Management
+
+### Create Instance (Admin)
+
+	POST /admin/instances
+	Admin endpoint to create an instance for any user.
+
+### Update Instance (Admin)
+
+	PUT /admin/instances/:id
+	Admin endpoint to update any instance.
+
+### Delete Instance (Admin)
+
+	DELETE /admin/instances/:id
+	Admin endpoint to delete any instance.
+
+## Request/Response Examples
+
+### Start/Stop Instance Request
+
+	{
+	  "instanceId": "i-1234567890abcdef0",
+	  "region": "us-west-2"
+	}
+
+### Instance Status Response
+
+	{
+	  "state": "running",
+	  "name": "i-1234567890abcdef0",
+	  "region": "us-west-2"
+	}
+
+### List Instances Response
+
+	[
+	  {
+	    "id": 1,
+	    "name": "My VPN Server",
+	    "instanceId": "i-1234567890abcdef0",
+	    "region": "us-west-2",
+	    "description": "Primary VPN server",
+	    "status": "running",
+	    "createdBy": 1,
+	    "createdAt": "2023-01-01T00:00:00Z",
+	    "updatedAt": "2023-01-01T00:00:00Z"
+	  }
+	]
+*/
 package aws
 
 import (
@@ -9,25 +114,53 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/agndam-corp/web-backend/database"
+	"github.com/agndam-corp/web-backend/models"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-var ec2Client *ec2.Client
-var instanceID string
+var defaultInstanceID string
+var defaultRegion string
+var defaultConfig aws.Config
+var defaultHTTPClient *http.Client
+
+// InstanceRequest represents the request body for AWS instance operations
+type InstanceRequest struct {
+	InstanceID string `json:"instanceId" form:"instanceId"`
+	Region     string `json:"region" form:"region"`
+}
+
+// createEC2ClientForRegion creates an EC2 client for a specific region
+func createEC2ClientForRegion(region string) (*ec2.Client, error) {
+	if defaultConfig.Region == "" {
+		return nil, fmt.Errorf("default AWS configuration not initialized")
+	}
+
+	// Create a copy of the default configuration with the specified region
+	cfg := defaultConfig.Copy()
+	cfg.Region = region
+
+	// Create EC2 client with the region-specific configuration
+	ec2Client := ec2.NewFromConfig(cfg, func(o *ec2.Options) {
+		o.HTTPClient = defaultHTTPClient
+	})
+
+	return ec2Client, nil
+}
 
 // InitAWS initializes AWS clients with IAM Roles Anywhere support
 func InitAWS() {
-	// Get the instance ID from environment variable
-	instanceID = os.Getenv("VPN_INSTANCE_ID")
-	if instanceID == "" {
-		log.Fatal("VPN_INSTANCE_ID environment variable is required")
-	}
+	// Get the default instance ID and region from environment variable
+	defaultInstanceID = os.Getenv("VPN_INSTANCE_ID")
+	defaultRegion = os.Getenv("AWS_REGION")
 
 	// Load client certificate and key for IAM Roles Anywhere
 	certFile := "/etc/ssl/certs/webapp/tls.crt"
@@ -60,129 +193,309 @@ func InitAWS() {
 
 	// Load AWS configuration with IAM Roles Anywhere support
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(os.Getenv("AWS_REGION")),
+		config.WithRegion(defaultRegion),
 		config.WithHTTPClient(httpClient),
 	)
 	if err != nil {
-		log.Printf("Warning: unable to load AWS SDK config, %v", err)
-		// We'll try to create the client anyway, but operations will fail
+		log.Fatalf("Failed to load AWS SDK config: %v", err)
 	}
 
-	// Create STS client
-	stsClient := sts.NewFromConfig(cfg)
-
-	// Create credentials using IAM Roles Anywhere
-	// The role ARN is determined by the trust policy in the IAM Roles Anywhere profile
-	creds := stscreds.NewAssumeRoleProvider(stsClient, "unused-parameter")
-
-	// Create EC2 client with the assumed role credentials
-	ec2Client = ec2.NewFromConfig(cfg, func(o *ec2.Options) {
-		o.Credentials = aws.NewCredentialsCache(creds)
+	// Create STS client with the custom HTTP client
+	stsClient := sts.NewFromConfig(cfg, func(o *sts.Options) {
 		o.HTTPClient = httpClient
 	})
+
+	// Create credentials using IAM Roles Anywhere
+	// The role ARN should be set in environment variable or defaults to IAM Roles Anywhere profile
+	roleARN := os.Getenv("IAM_ROLE_ARN")
+	if roleARN == "" {
+		// If no role ARN is specified, we'll use the default credential chain which should work for IAM Roles Anywhere
+		// But we still need to ensure we're using the custom HTTP client
+	} else {
+		// Create credentials using STS AssumeRole with the specified role ARN
+		creds := stscreds.NewAssumeRoleProvider(stsClient, roleARN)
+		// Update the config with new credentials
+		cfg.Credentials = aws.NewCredentialsCache(creds)
+	}
+
+	// Store the config for later use with different regions
+	defaultConfig = cfg
+	defaultHTTPClient = httpClient
 }
 
 // StartInstance	godoc
-// @Summary Start VPN instance
-// @Description Start the VPN EC2 instance
-// @Tags VPN Management
-// @Produce json
-// @Success 200 {object} types.SuccessResponse "Instance start command sent"
-// @Failure 500 {object} types.ErrorResponse "Failed to start instance"
-// @Router /start [post]
+//
+//	@Summary		Start VPN instance
+//	@Description	Start the VPN EC2 instance
+//	@Tags			VPN Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		InstanceRequest			true	"Instance ID and Region"
+//	@Success		200		{object}	types.SuccessResponse	"Instance start command sent"
+//	@Failure		400		{object}	types.ErrorResponse		"Bad request"
+//	@Failure		404		{object}	types.ErrorResponse		"Instance not found in database"
+//	@Failure		500		{object}	types.ErrorResponse		"Failed to start instance"
+//	@Router			/start [post]
 func StartInstance(c *gin.Context) {
-	if ec2Client == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
+	var req InstanceRequest
+
+	// Try to bind JSON first, then form data
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// If JSON binding fails, try to get from form/query parameters
+		c.ShouldBind(&req)
+	}
+
+	// Validate required parameters
+	if req.InstanceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance ID is required"})
+		return
+	}
+
+	// Check if the instance exists in the database
+	var dbInstance models.AWSInstance
+	if err := database.DB.Where("instance_id = ?", req.InstanceID).First(&dbInstance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found in database"})
+			return
+		}
+		log.Printf("Error querying AWS instance from database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Use the region from the database if not provided in request
+	if req.Region == "" {
+		req.Region = dbInstance.Region
+	}
+
+	// Validate region
+	if req.Region == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Region is required"})
+		return
+	}
+
+	// Create EC2 client for the specific region
+	ec2Client, err := createEC2ClientForRegion(req.Region)
+	if err != nil {
+		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
 		return
 	}
 
 	input := &ec2.StartInstancesInput{
-		InstanceIds: []string{instanceID},
+		InstanceIds: []string{req.InstanceID},
 	}
 
 	result, err := ec2Client.StartInstances(context.TODO(), input)
 	if err != nil {
-		log.Printf("Failed to start instance %s: %v", instanceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to start instance: %v", err)})
+		log.Printf("Failed to start instance %s in region %s: %v", req.InstanceID, req.Region, err)
+		// Check if error is related to endpoint resolution or credentials
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "ResolveEndpointV2") ||
+			strings.Contains(errMsg, "NoCredentialProviders") ||
+			strings.Contains(errMsg, "region") {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to start instance: %v", err)})
+		}
 		return
 	}
 
 	log.Printf("Start instance result: %v", result)
 	if len(result.StartingInstances) > 0 {
+		// Update the status in the database
+		dbInstance.Status = string(result.StartingInstances[0].CurrentState.Name)
+		database.DB.Save(&dbInstance)
+
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Instance start command sent",
-			"state":   result.StartingInstances[0].CurrentState.Name,
+			"message":    "Instance start command sent",
+			"state":      string(result.StartingInstances[0].CurrentState.Name),
+			"instanceId": req.InstanceID,
+			"region":     req.Region,
 		})
 	} else {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Instance start command sent",
-			"state":   "unknown",
+			"message":    "Instance start command sent",
+			"state":      "unknown",
+			"instanceId": req.InstanceID,
+			"region":     req.Region,
 		})
 	}
 }
 
 // StopInstance	godoc
-// @Summary Stop VPN instance
-// @Description Stop the VPN EC2 instance
-// @Tags VPN Management
-// @Produce json
-// @Success 200 {object} types.SuccessResponse "Instance stop command sent"
-// @Failure 500 {object} types.ErrorResponse "Failed to stop instance"
-// @Router /stop [post]
+//
+//	@Summary		Stop VPN instance
+//	@Description	Stop the VPN EC2 instance
+//	@Tags			VPN Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		InstanceRequest			true	"Instance ID and Region"
+//	@Success		200		{object}	types.SuccessResponse	"Instance stop command sent"
+//	@Failure		400		{object}	types.ErrorResponse		"Bad request"
+//	@Failure		404		{object}	types.ErrorResponse		"Instance not found in database"
+//	@Failure		500		{object}	types.ErrorResponse		"Failed to stop instance"
+//	@Router			/stop [post]
 func StopInstance(c *gin.Context) {
-	if ec2Client == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
+	var req InstanceRequest
+
+	// Try to bind JSON first, then form data
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// If JSON binding fails, try to get from form/query parameters
+		c.ShouldBind(&req)
+	}
+
+	// Validate required parameters
+	if req.InstanceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance ID is required"})
+		return
+	}
+
+	// Check if the instance exists in the database
+	var dbInstance models.AWSInstance
+	if err := database.DB.Where("instance_id = ?", req.InstanceID).First(&dbInstance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found in database"})
+			return
+		}
+		log.Printf("Error querying AWS instance from database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Use the region from the database if not provided in request
+	if req.Region == "" {
+		req.Region = dbInstance.Region
+	}
+
+	// Validate region
+	if req.Region == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Region is required"})
+		return
+	}
+
+	// Create EC2 client for the specific region
+	ec2Client, err := createEC2ClientForRegion(req.Region)
+	if err != nil {
+		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
 		return
 	}
 
 	input := &ec2.StopInstancesInput{
-		InstanceIds: []string{instanceID},
+		InstanceIds: []string{req.InstanceID},
 	}
 
 	result, err := ec2Client.StopInstances(context.TODO(), input)
 	if err != nil {
-		log.Printf("Failed to stop instance %s: %v", instanceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to stop instance: %v", err)})
+		log.Printf("Failed to stop instance %s in region %s: %v", req.InstanceID, req.Region, err)
+		// Check if error is related to endpoint resolution or credentials
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "ResolveEndpointV2") ||
+			strings.Contains(errMsg, "NoCredentialProviders") ||
+			strings.Contains(errMsg, "region") {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to stop instance: %v", err)})
+		}
 		return
 	}
 
 	log.Printf("Stop instance result: %v", result)
 	if len(result.StoppingInstances) > 0 {
+		// Update the status in the database
+		dbInstance.Status = string(result.StoppingInstances[0].CurrentState.Name)
+		database.DB.Save(&dbInstance)
+
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Instance stop command sent",
-			"state":   result.StoppingInstances[0].CurrentState.Name,
+			"message":    "Instance stop command sent",
+			"state":      string(result.StoppingInstances[0].CurrentState.Name),
+			"instanceId": req.InstanceID,
+			"region":     req.Region,
 		})
 	} else {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Instance stop command sent",
-			"state":   "unknown",
+			"message":    "Instance stop command sent",
+			"state":      "unknown",
+			"instanceId": req.InstanceID,
+			"region":     req.Region,
 		})
 	}
 }
 
 // GetInstanceStatus	godoc
-// @Summary Get VPN instance status
-// @Description Get the current status of the VPN EC2 instance
-// @Tags VPN Management
-// @Produce json
-// @Success 200 {object} types.StatusResponse "Instance status with state and name"
-// @Failure 404 {object} types.ErrorResponse "Instance not found"
-// @Failure 500 {object} types.ErrorResponse "Failed to get instance status"
-// @Router /status [get]
+//
+//	@Summary		Get VPN instance status
+//	@Description	Get the current status of the VPN EC2 instance
+//	@Tags			VPN Management
+//	@Produce		json
+//	@Param			instanceId	query		string					false	"Instance ID"
+//	@Param			region		query		string					false	"AWS Region"
+//	@Success		200			{object}	types.StatusResponse	"Instance status with state and name"
+//	@Failure		400			{object}	types.ErrorResponse		"Bad request"
+//	@Failure		404			{object}	types.ErrorResponse		"Instance not found"
+//	@Failure		500			{object}	types.ErrorResponse		"Failed to get instance status"
+//	@Router			/status [get]
 func GetInstanceStatus(c *gin.Context) {
-	if ec2Client == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS client not initialized"})
+	var req InstanceRequest
+
+	// Get parameters from query string
+	req.InstanceID = c.Query("instanceId")
+	req.Region = c.Query("region")
+
+	// Validate required parameters
+	if req.InstanceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance ID is required"})
+		return
+	}
+
+	// Check if the instance exists in the database
+	var dbInstance models.AWSInstance
+	if err := database.DB.Where("instance_id = ?", req.InstanceID).First(&dbInstance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found in database"})
+			return
+		}
+		log.Printf("Error querying AWS instance from database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Use the region from the database if not provided in request
+	if req.Region == "" {
+		req.Region = dbInstance.Region
+	}
+
+	// Validate region
+	if req.Region == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Region is required"})
+		return
+	}
+
+	// Create EC2 client for the specific region
+	ec2Client, err := createEC2ClientForRegion(req.Region)
+	if err != nil {
+		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
 		return
 	}
 
 	input := &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
+		InstanceIds: []string{req.InstanceID},
 	}
 
 	result, err := ec2Client.DescribeInstances(context.TODO(), input)
 	if err != nil {
-		log.Printf("Failed to get instance status %s: %v", instanceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get instance status: %v", err)})
+		log.Printf("Failed to get instance status %s in region %s: %v", req.InstanceID, req.Region, err)
+		// Check if error is related to endpoint resolution or credentials
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "ResolveEndpointV2") ||
+			strings.Contains(errMsg, "NoCredentialProviders") ||
+			strings.Contains(errMsg, "region") {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get instance status: %v", err)})
+		}
 		return
 	}
 
@@ -192,8 +505,350 @@ func GetInstanceStatus(c *gin.Context) {
 	}
 
 	instanceState := result.Reservations[0].Instances[0].State.Name
+	// Update the status in the database
+	dbInstance.Status = string(instanceState)
+	database.DB.Save(&dbInstance)
+
 	c.JSON(http.StatusOK, gin.H{
-		"state": string(instanceState),
-		"name":  instanceID,
+		"state":  string(instanceState),
+		"name":   req.InstanceID,
+		"region": req.Region,
 	})
+}
+
+// GetInstances godoc
+//
+//	@Summary		Get list of AWS instances
+//	@Description	Get a list of all AWS instances in the database
+//	@Tags			VPN Management
+//	@Produce		json
+//	@Success		200	{array}		models.AWSInstance	"List of AWS instances"
+//	@Failure		500	{object}	types.ErrorResponse	"Failed to fetch instances"
+//	@Router			/instances [get]
+func GetInstances(c *gin.Context) {
+	var instances []models.AWSInstance
+
+	// Get user ID from context to filter instances they created
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
+		return
+	}
+
+	// Query instances from database - only return instances created by the current user
+	if err := database.DB.Where("created_by = ?", userID).Find(&instances).Error; err != nil {
+		log.Printf("Failed to fetch AWS instances: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch instances"})
+		return
+	}
+
+	c.JSON(http.StatusOK, instances)
+}
+
+// GetInstance godoc
+//
+//	@Summary		Get a specific AWS instance
+//	@Description	Get details of a specific AWS instance by ID
+//	@Tags			VPN Management
+//	@Produce		json
+//	@Param			id	path		string				true	"Instance ID"
+//	@Success		200	{object}	models.AWSInstance	"AWS instance details"
+//	@Failure		404	{object}	types.ErrorResponse	"Instance not found"
+//	@Failure		500	{object}	types.ErrorResponse	"Failed to fetch instance"
+//	@Router			/instances/{id} [get]
+func GetInstance(c *gin.Context) {
+	id := c.Param("id")
+
+	var instance models.AWSInstance
+	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
+			return
+		}
+		log.Printf("Failed to fetch AWS instance: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch instance"})
+		return
+	}
+
+	c.JSON(http.StatusOK, instance)
+}
+
+// CreateInstance godoc
+//
+//	@Summary		Create a new AWS instance
+//	@Description	Create a new AWS instance configuration in the database
+//	@Tags			VPN Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
+//	@Success		201			{object}	models.AWSInstance	"Created AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
+//	@Failure		500			{object}	types.ErrorResponse	"Failed to create instance"
+//	@Router			/instances [post]
+func CreateInstance(c *gin.Context) {
+	var req models.AWSInstance
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get user ID from context
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
+		return
+	}
+	req.CreatedBy = userID.(uint)
+
+	// Validate required fields
+	if req.InstanceID == "" || req.Region == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance ID and Region are required"})
+		return
+	}
+
+	// Check if instance with this ID already exists
+	var existingInstance models.AWSInstance
+	if err := database.DB.Where("instance_id = ?", req.InstanceID).First(&existingInstance).Error; err == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance with this ID already exists"})
+		return
+	}
+
+	// Create the instance in the database
+	if err := database.DB.Create(&req).Error; err != nil {
+		log.Printf("Failed to create AWS instance: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create instance"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, req)
+}
+
+// UpdateInstance godoc
+//
+//	@Summary		Update an existing AWS instance
+//	@Description	Update an existing AWS instance configuration in the database
+//	@Tags			VPN Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			id			path		string				true	"Instance ID"
+//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
+//	@Success		200			{object}	models.AWSInstance	"Updated AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
+//	@Failure		404			{object}	types.ErrorResponse	"Instance not found"
+//	@Failure		500			{object}	types.ErrorResponse	"Failed to update instance"
+//	@Router			/instances/{id} [put]
+func UpdateInstance(c *gin.Context) {
+	id := c.Param("id")
+
+	var instance models.AWSInstance
+	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
+			return
+		}
+		log.Printf("Failed to fetch AWS instance for update: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch instance"})
+		return
+	}
+
+	var req models.AWSInstance
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Update only allowed fields (avoid updating ID, CreatedBy, timestamps)
+	instance.Name = req.Name
+	instance.Region = req.Region
+	instance.Description = req.Description
+
+	if err := database.DB.Save(&instance).Error; err != nil {
+		log.Printf("Failed to update AWS instance: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update instance"})
+		return
+	}
+
+	c.JSON(http.StatusOK, instance)
+}
+
+// DeleteInstance godoc
+//
+//	@Summary		Delete an AWS instance
+//	@Description	Delete an AWS instance configuration from the database
+//	@Tags			VPN Management
+//	@Produce		json
+//	@Param			id	path	string	true	"Instance ID"
+//	@Success		204	"Instance deleted successfully"
+//	@Failure		404	{object}	types.ErrorResponse	"Instance not found"
+//	@Failure		500	{object}	types.ErrorResponse	"Failed to delete instance"
+//	@Router			/instances/{id} [delete]
+func DeleteInstance(c *gin.Context) {
+	id := c.Param("id")
+
+	var instance models.AWSInstance
+	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
+			return
+		}
+		log.Printf("Failed to fetch AWS instance for deletion: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch instance"})
+		return
+	}
+
+	// Verify that the current user owns this instance (for non-admin users)
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
+		return
+	}
+
+	if instance.CreatedBy != userID.(uint) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own instances"})
+		return
+	}
+
+	if err := database.DB.Delete(&instance).Error; err != nil {
+		log.Printf("Failed to delete AWS instance: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete instance"})
+		return
+	}
+
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// AdminCreateInstance godoc
+//
+//	@Summary		Admin: Create a new AWS instance
+//	@Description	Create a new AWS instance configuration in the database (admin only)
+//	@Tags			VPN Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
+//	@Success		201			{object}	models.AWSInstance	"Created AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
+//	@Failure		500			{object}	types.ErrorResponse	"Failed to create instance"
+//	@Router			/admin/instances [post]
+func AdminCreateInstance(c *gin.Context) {
+	var req models.AWSInstance
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate required fields
+	if req.InstanceID == "" || req.Region == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance ID and Region are required"})
+		return
+	}
+
+	// Check if instance with this ID already exists
+	var existingInstance models.AWSInstance
+	if err := database.DB.Where("instance_id = ?", req.InstanceID).First(&existingInstance).Error; err == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance with this ID already exists"})
+		return
+	}
+
+	// Admin can create instance for any user, default to admin's user ID if not specified
+	if req.CreatedBy == 0 {
+		adminUserID, exists := c.Get("userId")
+		if !exists {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
+			return
+		}
+		req.CreatedBy = adminUserID.(uint)
+	}
+
+	// Create the instance in the database
+	if err := database.DB.Create(&req).Error; err != nil {
+		log.Printf("Failed to create AWS instance: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create instance"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, req)
+}
+
+// AdminUpdateInstance godoc
+//
+//	@Summary		Admin: Update an existing AWS instance
+//	@Description	Update an existing AWS instance configuration in the database (admin only)
+//	@Tags			VPN Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			id			path		string				true	"Instance ID"
+//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
+//	@Success		200			{object}	models.AWSInstance	"Updated AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
+//	@Failure		404			{object}	types.ErrorResponse	"Instance not found"
+//	@Failure		500			{object}	types.ErrorResponse	"Failed to update instance"
+//	@Router			/admin/instances/{id} [put]
+func AdminUpdateInstance(c *gin.Context) {
+	id := c.Param("id")
+
+	var instance models.AWSInstance
+	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
+			return
+		}
+		log.Printf("Failed to fetch AWS instance for update: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch instance"})
+		return
+	}
+
+	var req models.AWSInstance
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Update allowed fields
+	instance.Name = req.Name
+	instance.Region = req.Region
+	instance.Description = req.Description
+	// Note: Not allowing update of InstanceID or CreatedBy as these are critical fields
+
+	if err := database.DB.Save(&instance).Error; err != nil {
+		log.Printf("Failed to update AWS instance: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update instance"})
+		return
+	}
+
+	c.JSON(http.StatusOK, instance)
+}
+
+// AdminDeleteInstance godoc
+//
+//	@Summary		Admin: Delete an AWS instance
+//	@Description	Delete an AWS instance configuration from the database (admin only)
+//	@Tags			VPN Management
+//	@Produce		json
+//	@Param			id	path	string	true	"Instance ID"
+//	@Success		204	"Instance deleted successfully"
+//	@Failure		404	{object}	types.ErrorResponse	"Instance not found"
+//	@Failure		500	{object}	types.ErrorResponse	"Failed to delete instance"
+//	@Router			/admin/instances/{id} [delete]
+func AdminDeleteInstance(c *gin.Context) {
+	id := c.Param("id")
+
+	var instance models.AWSInstance
+	if err := database.DB.Where("id = ?", id).First(&instance).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
+			return
+		}
+		log.Printf("Failed to fetch AWS instance for deletion: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch instance"})
+		return
+	}
+
+	// Admins can delete any instance
+	if err := database.DB.Delete(&instance).Error; err != nil {
+		log.Printf("Failed to delete AWS instance: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete instance"})
+		return
+	}
+
+	c.JSON(http.StatusNoContent, nil)
 }

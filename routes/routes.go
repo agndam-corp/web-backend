@@ -3,12 +3,12 @@ package routes
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/agndam-corp/web-backend/auth"
 	"github.com/agndam-corp/web-backend/aws"
 	"github.com/agndam-corp/web-backend/database"
 	"github.com/agndam-corp/web-backend/middleware"
 	"github.com/agndam-corp/web-backend/models"
+	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -76,6 +76,11 @@ func SetupRoutes(router *gin.Engine) {
 				"role":     string(newAdmin.Role),
 			})
 		})
+
+		// Admin endpoint to manage AWS instances
+		adminGroup.POST("/instances", aws.AdminCreateInstance)
+		adminGroup.PUT("/instances/:id", aws.AdminUpdateInstance)
+		adminGroup.DELETE("/instances/:id", aws.AdminDeleteInstance)
 	}
 
 	// Protected AWS routes (require authentication)
@@ -85,6 +90,13 @@ func SetupRoutes(router *gin.Engine) {
 		protected.POST("/start", aws.StartInstance)
 		protected.POST("/stop", aws.StopInstance)
 		protected.GET("/status", aws.GetInstanceStatus)
+
+		// AWS Instance management routes
+		protected.GET("/instances", aws.GetInstances)
+		protected.POST("/instances", aws.CreateInstance)
+		protected.GET("/instances/:id", aws.GetInstance)
+		protected.PUT("/instances/:id", aws.UpdateInstance)
+		protected.DELETE("/instances/:id", aws.DeleteInstance)
 
 		// Auth check endpoint that returns user info
 		protected.GET("/auth-check", func(c *gin.Context) {

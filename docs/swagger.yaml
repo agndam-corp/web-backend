@@ -1,4 +1,87 @@
 definitions:
+  aws.InstanceRequest:
+    properties:
+      instanceId:
+        type: string
+      region:
+        type: string
+    type: object
+  models.AWSInstance:
+    properties:
+      created_at:
+        type: string
+      createdBy:
+        description: User ID who created this instance
+        type: integer
+      createdByUser:
+        allOf:
+        - $ref: '#/definitions/models.User'
+        description: User relationship - the user who created this instance
+      description:
+        type: string
+      id:
+        type: integer
+      instanceId:
+        type: string
+      name:
+        type: string
+      region:
+        type: string
+      status:
+        description: 'current status: running, stopped, etc.'
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.Role:
+    enum:
+    - user
+    - admin
+    type: string
+    x-enum-varnames:
+    - RoleUser
+    - RoleAdmin
+  models.Session:
+    properties:
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: integer
+      last_activity:
+        type: string
+      refresh_token:
+        type: string
+      user:
+        allOf:
+        - $ref: '#/definitions/models.User'
+        description: User relationship
+      user_id:
+        type: integer
+    type: object
+  models.User:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: integer
+      role:
+        allOf:
+        - $ref: '#/definitions/models.Role'
+        description: Default to user role
+      sessions:
+        description: Sessions relationship
+        items:
+          $ref: '#/definitions/models.Session'
+        type: array
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
   types.ErrorResponse:
     properties:
       error:
@@ -21,6 +104,8 @@ definitions:
     properties:
       name:
         type: string
+      region:
+        type: string
       state:
         type: string
     type: object
@@ -33,6 +118,101 @@ definitions:
 info:
   contact: {}
 paths:
+  /admin/instances:
+    post:
+      consumes:
+      - application/json
+      description: Create a new AWS instance configuration in the database (admin
+        only)
+      parameters:
+      - description: AWS Instance
+        in: body
+        name: instance
+        required: true
+        schema:
+          $ref: '#/definitions/models.AWSInstance'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created AWS instance
+          schema:
+            $ref: '#/definitions/models.AWSInstance'
+        "400":
+          description: Bad request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to create instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: 'Admin: Create a new AWS instance'
+      tags:
+      - VPN Management
+  /admin/instances/{id}:
+    delete:
+      description: Delete an AWS instance configuration from the database (admin only)
+      parameters:
+      - description: Instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Instance deleted successfully
+        "404":
+          description: Instance not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to delete instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: 'Admin: Delete an AWS instance'
+      tags:
+      - VPN Management
+    put:
+      consumes:
+      - application/json
+      description: Update an existing AWS instance configuration in the database (admin
+        only)
+      parameters:
+      - description: Instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: AWS Instance
+        in: body
+        name: instance
+        required: true
+        schema:
+          $ref: '#/definitions/models.AWSInstance'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated AWS instance
+          schema:
+            $ref: '#/definitions/models.AWSInstance'
+        "400":
+          description: Bad request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Instance not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to update instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: 'Admin: Update an existing AWS instance'
+      tags:
+      - VPN Management
   /auth/login:
     post:
       consumes:
@@ -153,9 +333,155 @@ paths:
       summary: User registration
       tags:
       - Authentication
+  /instances:
+    get:
+      description: Get a list of all AWS instances in the database
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of AWS instances
+          schema:
+            items:
+              $ref: '#/definitions/models.AWSInstance'
+            type: array
+        "500":
+          description: Failed to fetch instances
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Get list of AWS instances
+      tags:
+      - VPN Management
+    post:
+      consumes:
+      - application/json
+      description: Create a new AWS instance configuration in the database
+      parameters:
+      - description: AWS Instance
+        in: body
+        name: instance
+        required: true
+        schema:
+          $ref: '#/definitions/models.AWSInstance'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created AWS instance
+          schema:
+            $ref: '#/definitions/models.AWSInstance'
+        "400":
+          description: Bad request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to create instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Create a new AWS instance
+      tags:
+      - VPN Management
+  /instances/{id}:
+    delete:
+      description: Delete an AWS instance configuration from the database
+      parameters:
+      - description: Instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Instance deleted successfully
+        "404":
+          description: Instance not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to delete instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Delete an AWS instance
+      tags:
+      - VPN Management
+    get:
+      description: Get details of a specific AWS instance by ID
+      parameters:
+      - description: Instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: AWS instance details
+          schema:
+            $ref: '#/definitions/models.AWSInstance'
+        "404":
+          description: Instance not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to fetch instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Get a specific AWS instance
+      tags:
+      - VPN Management
+    put:
+      consumes:
+      - application/json
+      description: Update an existing AWS instance configuration in the database
+      parameters:
+      - description: Instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: AWS Instance
+        in: body
+        name: instance
+        required: true
+        schema:
+          $ref: '#/definitions/models.AWSInstance'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated AWS instance
+          schema:
+            $ref: '#/definitions/models.AWSInstance'
+        "400":
+          description: Bad request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Instance not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Failed to update instance
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Update an existing AWS instance
+      tags:
+      - VPN Management
   /start:
     post:
+      consumes:
+      - application/json
       description: Start the VPN EC2 instance
+      parameters:
+      - description: Instance ID and Region
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/aws.InstanceRequest'
       produces:
       - application/json
       responses:
@@ -163,6 +489,14 @@ paths:
           description: Instance start command sent
           schema:
             $ref: '#/definitions/types.SuccessResponse'
+        "400":
+          description: Bad request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Instance not found in database
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
         "500":
           description: Failed to start instance
           schema:
@@ -173,6 +507,15 @@ paths:
   /status:
     get:
       description: Get the current status of the VPN EC2 instance
+      parameters:
+      - description: Instance ID
+        in: query
+        name: instanceId
+        type: string
+      - description: AWS Region
+        in: query
+        name: region
+        type: string
       produces:
       - application/json
       responses:
@@ -180,6 +523,10 @@ paths:
           description: Instance status with state and name
           schema:
             $ref: '#/definitions/types.StatusResponse'
+        "400":
+          description: Bad request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
         "404":
           description: Instance not found
           schema:
@@ -193,7 +540,16 @@ paths:
       - VPN Management
   /stop:
     post:
+      consumes:
+      - application/json
       description: Stop the VPN EC2 instance
+      parameters:
+      - description: Instance ID and Region
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/aws.InstanceRequest'
       produces:
       - application/json
       responses:
@@ -201,6 +557,14 @@ paths:
           description: Instance stop command sent
           schema:
             $ref: '#/definitions/types.SuccessResponse'
+        "400":
+          description: Bad request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Instance not found in database
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
         "500":
           description: Failed to stop instance
           schema:

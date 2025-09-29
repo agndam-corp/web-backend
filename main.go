@@ -4,13 +4,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/agndam-corp/web-backend/auth"
 	"github.com/agndam-corp/web-backend/aws"
 	"github.com/agndam-corp/web-backend/database"
 	"github.com/agndam-corp/web-backend/routes"
+	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func main() {

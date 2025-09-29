@@ -22,6 +22,7 @@ type SuccessResponse struct {
 
 // StatusResponse represents VPN instance status response
 type StatusResponse struct {
-	State string `json:"state"`
-	Name  string `json:"name"`
+	State  string `json:"state"`
+	Name   string `json:"name"`
+	Region string `json:"region,omitempty"`
 }

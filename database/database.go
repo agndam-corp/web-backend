@@ -50,7 +50,7 @@ func Migrate() error {
 	resetDB := os.Getenv("RESET_DATABASE") == "true"
 	if resetDB {
 		log.Println("Resetting database - dropping all tables")
-		err := DB.Migrator().DropTable(&models.User{}, &models.Session{})
+		err := DB.Migrator().DropTable(&models.User{}, &models.Session{}, &models.AWSInstance{})
 		if err != nil {
 			log.Printf("Warning: error dropping tables: %v", err)
 			// Continue anyway, might be because tables don't exist yet
@@ -62,9 +62,13 @@ func Migrate() error {
 		return fmt.Errorf("error migrating User table: %v", err)
 	}
 
-	// Then migrate the Session table
+	// Then migrate the Session table and AWSInstance table
 	if err := DB.AutoMigrate(&models.Session{}); err != nil {
 		return fmt.Errorf("error migrating Session table: %v", err)
+	}
+
+	if err := DB.AutoMigrate(&models.AWSInstance{}); err != nil {
+		return fmt.Errorf("error migrating AWSInstance table: %v", err)
 	}
 
 	log.Println("Database migration completed successfully")

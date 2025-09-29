@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/agndam-corp/web-backend/auth"
 	"github.com/agndam-corp/web-backend/database"
 	"github.com/agndam-corp/web-backend/models"
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // AuthMiddleware checks if user is authenticated
