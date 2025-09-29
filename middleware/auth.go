@@ -78,7 +78,7 @@ func AuthMiddleware(c *gin.Context) {
 	log.Printf("Auth middleware: Session activity updated for user ID: %s", claims.RegisteredClaims.Subject)
 
 	// Store user info in context for use in handlers
-	c.Set("user_id", claims.RegisteredClaims.Subject)
+	c.Set("userId", claims.RegisteredClaims.Subject)
 	c.Set("username", claims.Username)
 	c.Set("role", claims.Role)
 	log.Printf("Auth middleware: User authenticated - Username: %s, Role: %s", claims.Username, claims.Role)
