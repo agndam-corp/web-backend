@@ -283,6 +283,8 @@ func StartInstance(c *gin.Context) {
 		return
 	}
 
+	log.Printf("About to start AWS instance %s in region %s", req.InstanceID, req.Region)
+	
 	input := &ec2.StartInstancesInput{
 		InstanceIds: []string{req.InstanceID},
 	}
@@ -295,12 +297,16 @@ func StartInstance(c *gin.Context) {
 		if strings.Contains(errMsg, "ResolveEndpointV2") ||
 			strings.Contains(errMsg, "NoCredentialProviders") ||
 			strings.Contains(errMsg, "region") {
+			log.Printf("AWS configuration error when starting instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
 		} else {
+			log.Printf("General AWS API error when starting instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to start instance: %v", err)})
 		}
 		return
 	}
+	
+	log.Printf("Successfully sent start command for instance %s", req.InstanceID)
 
 	log.Printf("Start instance result: %v", result)
 	if len(result.StartingInstances) > 0 {
@@ -385,6 +391,8 @@ func StopInstance(c *gin.Context) {
 		return
 	}
 
+	log.Printf("About to stop AWS instance %s in region %s", req.InstanceID, req.Region)
+	
 	input := &ec2.StopInstancesInput{
 		InstanceIds: []string{req.InstanceID},
 	}
@@ -397,12 +405,16 @@ func StopInstance(c *gin.Context) {
 		if strings.Contains(errMsg, "ResolveEndpointV2") ||
 			strings.Contains(errMsg, "NoCredentialProviders") ||
 			strings.Contains(errMsg, "region") {
+			log.Printf("AWS configuration error when stopping instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
 		} else {
+			log.Printf("General AWS API error when stopping instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to stop instance: %v", err)})
 		}
 		return
 	}
+	
+	log.Printf("Successfully sent stop command for instance %s", req.InstanceID)
 
 	log.Printf("Stop instance result: %v", result)
 	if len(result.StoppingInstances) > 0 {
@@ -485,6 +497,8 @@ func GetInstanceStatus(c *gin.Context) {
 		return
 	}
 
+	log.Printf("About to query AWS for instance %s in region %s", req.InstanceID, req.Region)
+	
 	input := &ec2.DescribeInstancesInput{
 		InstanceIds: []string{req.InstanceID},
 	}
@@ -497,12 +511,16 @@ func GetInstanceStatus(c *gin.Context) {
 		if strings.Contains(errMsg, "ResolveEndpointV2") ||
 			strings.Contains(errMsg, "NoCredentialProviders") ||
 			strings.Contains(errMsg, "region") {
+			log.Printf("AWS configuration error for instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
 		} else {
+			log.Printf("General AWS API error for instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get instance status: %v", err)})
 		}
 		return
 	}
+	
+	log.Printf("Successfully retrieved instance status for %s, result count: %d", req.InstanceID, len(result.Reservations))
 
 	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
