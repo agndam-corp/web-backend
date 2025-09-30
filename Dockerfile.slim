@@ -1,21 +1,19 @@
-FROM amazonlinux:2023
+FROM alpine:3.20
 
 # Install dependencies using dnf
-RUN yum install -y unzip
+RUN apk --no-cache add \
+    ca-certificates \
+    curl \
+    bash \
+    gcompat
 
 WORKDIR /root/
 
-# Install aws_signing_helper (Amzn2023 binary)
+# Install aws_signing_helper
 ENV AWS_SIGNING_HELPER_VERSION=1.7.1
 RUN ARCH="X86_64" && \
     curl -sL "https://rolesanywhere.amazonaws.com/releases/${AWS_SIGNING_HELPER_VERSION}/${ARCH}/Linux/Amzn2023/aws_signing_helper" -o /usr/local/bin/aws_signing_helper && \
     chmod +x /usr/local/bin/aws_signing_helper
-
-# Install AWS CLI v2
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
-    unzip /tmp/awscliv2.zip -d /tmp && \
-    /tmp/aws/install && \
-    rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # Create .aws directory
 RUN mkdir -p /root/.aws
