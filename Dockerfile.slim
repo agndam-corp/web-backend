@@ -1,5 +1,5 @@
-# Use Amazon Linux 2023 (glibc-based) as base
-FROM amazonlinux:2023
+# Use Amazon Linux 2 (glibc-based, stable for AWS tools)
+FROM amazonlinux:2
 
 # Install dependencies
 RUN yum install -y \
@@ -26,4 +26,12 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
     /tmp/aws/install && \
     rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# Create .aws directory for creden
+# Create .aws directory
+RUN mkdir -p /root/.aws
+
+# Copy your Go app
+COPY main .
+
+EXPOSE 8080
+
+CMD ["./main"]
