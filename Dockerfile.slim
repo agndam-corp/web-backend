@@ -1,22 +1,20 @@
-FROM alpine:3.20
+# Use Amazon Linux 2023 (glibc-based) as base
+FROM amazonlinux:2023
 
-# Install required packages and glibc compatibility
-RUN apk --no-cache add \
-    ca-certificates \
+# Install dependencies
+RUN yum install -y \
     curl \
     bash \
-    gcompat \
-    python3 \
-    py3-pip \
-    jq \
     unzip \
-    groff \
-    less \
-    git
+    jq \
+    git \
+    tar \
+    gzip \
+    && yum clean all
 
 WORKDIR /root/
 
-# Install aws_signing_helper (Amzn2023 build, works with gcompat)
+# Install aws_signing_helper
 ENV AWS_SIGNING_HELPER_VERSION=1.7.1
 RUN ARCH="X86_64" && \
     curl -sL "https://rolesanywhere.amazonaws.com/releases/${AWS_SIGNING_HELPER_VERSION}/${ARCH}/Linux/Amzn2023/aws_signing_helper" -o /usr/local/bin/aws_signing_helper && \
@@ -28,12 +26,4 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
     /tmp/aws/install && \
     rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# Create .aws directory
-RUN mkdir -p /root/.aws
-
-# Copy your Go app
-COPY main .
-
-EXPOSE 8080
-
-CMD ["./main"]
+# Create .aws directory for creden
