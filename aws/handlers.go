@@ -136,25 +136,16 @@ type InstanceRequest struct {
 
 // loadAWSConfig loads AWS configuration with support for IAM Roles Anywhere
 func loadAWSConfig(region string) (aws.Config, error) {
-	// Primary attempt: Load config from specific paths where it's mounted in k8s
+	// Load config using the same approach as the working test - let AWS SDK find config files automatically
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithSharedConfigProfile(defaultProfile),
 		config.WithRegion(region),
-		config.WithSharedConfigFiles([]string{"/root/.aws/config", "/root/.aws/credentials"}), // Explicit paths where k8s mounts config
 	)
 	if err != nil {
-		log.Printf("Failed to load AWS config for region %s from explicit paths: %v", region, err)
-		// Fallback to default config loading if explicit paths fail
-		cfg, err = config.LoadDefaultConfig(context.Background(),
-			config.WithSharedConfigProfile(defaultProfile),
-			config.WithRegion(region),
-		)
-		if err != nil {
-			log.Printf("Failed to load AWS config with profile %s for region %s: %v", defaultProfile, region, err)
-			return cfg, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
-		}
+		log.Printf("Failed to load AWS config for region %s with profile %s: %v", region, defaultProfile, err)
+		return cfg, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
 	} else {
-		log.Printf("Successfully loaded AWS config from explicit paths for region: %s", region)
+		log.Printf("Successfully loaded AWS config with profile: %s for region: %s", defaultProfile, region)
 	}
 
 	return cfg, nil
