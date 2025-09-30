@@ -133,6 +133,32 @@ type InstanceRequest struct {
 	Region     string `json:"region" form:"region"`
 }
 
+// loadAWSConfig loads AWS configuration with support for IAM Roles Anywhere
+func loadAWSConfig(region string) (aws.Config, error) {
+	// Primary attempt: Load config from specific paths where it's mounted in k8s
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithSharedConfigProfile(defaultProfile),
+		config.WithRegion(region),
+		config.WithSharedConfigFiles([]string{"/root/.aws/config", "/root/.aws/credentials"}), // Explicit paths where k8s mounts config
+	)
+	if err != nil {
+		log.Printf("Failed to load AWS config for region %s from explicit paths: %v", region, err)
+		// Fallback to default config loading if explicit paths fail
+		cfg, err = config.LoadDefaultConfig(context.TODO(),
+			config.WithSharedConfigProfile(defaultProfile),
+			config.WithRegion(region),
+		)
+		if err != nil {
+			log.Printf("Failed to load AWS config with profile %s for region %s: %v", defaultProfile, region, err)
+			return cfg, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
+		}
+	} else {
+		log.Printf("Successfully loaded AWS config from explicit paths for region: %s", region)
+	}
+
+	return cfg, nil
+}
+
 // createEC2ClientForRegion creates an EC2 client for a specific region
 func createEC2ClientForRegion(region string) (*ec2.Client, error) {
 	if defaultHTTPClient == nil {
@@ -141,21 +167,13 @@ func createEC2ClientForRegion(region string) (*ec2.Client, error) {
 
 	log.Printf("Creating EC2 client for region: %s", region)
 
-	// Create a new configuration with the specified region but preserve credentials
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(region),
-		config.WithSharedConfigProfile(defaultProfile), // Use same profile for all regions
-		config.WithSharedConfigFiles([]string{"/root/.aws/config"}), // Explicitly specify config file location
-	)
+	cfg, err := loadAWSConfig(region)
 	if err != nil {
-		log.Printf("Failed to load AWS config for region %s: %v", region, err)
-		return nil, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
+		return nil, err
 	}
 
 	// Create EC2 client with the region-specific configuration
-	ec2Client := ec2.NewFromConfig(cfg, func(o *ec2.Options) {
-		o.HTTPClient = defaultHTTPClient
-	})
+	ec2Client := ec2.NewFromConfig(cfg)
 
 	return ec2Client, nil
 }
@@ -165,31 +183,23 @@ func InitAWS() {
 	// Get the default instance ID and region from environment variable
 	defaultInstanceID = os.Getenv("VPN_INSTANCE_ID")
 	defaultRegion = os.Getenv("AWS_REGION")
+	if defaultRegion == "" {
+		defaultRegion = "us-east-1" // Default to us-east-1 if not specified
+	}
 	
 	// Get the AWS profile name from environment variable
 	defaultProfile = os.Getenv("AWS_PROFILE")
 	if defaultProfile == "" {
-		defaultProfile = "default"
+		defaultProfile = "rolesanywhere-profile"  // Use the Roles Anywhere profile by default
 	}
 	
 	log.Printf("Initializing AWS with profile: %s, region: %s", defaultProfile, defaultRegion)
 
-	// Load config using the Roles Anywhere profile, but ensure config file location is correct
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithSharedConfigProfile(defaultProfile), // Use the Roles Anywhere profile
-		config.WithSharedConfigFiles([]string{"/root/.aws/config"}),  // Explicitly specify config file location
-	)
+	// Use the shared function to load config - this ensures consistency
+	_, err := loadAWSConfig(defaultRegion)
 	if err != nil {
 		log.Printf("Failed to load AWS SDK config with profile %s: %v", defaultProfile, err)
 		log.Fatalf("Failed to load AWS SDK config: %v", err)
-	} else {
-		log.Printf("Successfully loaded AWS config with profile: %s", defaultProfile)
-		// Use the region from the loaded config or fallback to environment
-		if cfg.Region != "" {
-			log.Printf("Using region from AWS config: %s", cfg.Region)
-		} else {
-			log.Printf("Config region not set, will use environment region: %s", defaultRegion)
-		}
 	}
 
 	// Initialize HTTP client
