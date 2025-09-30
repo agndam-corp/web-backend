@@ -116,7 +116,6 @@ import (
 
 	"github.com/agndam-corp/web-backend/database"
 	"github.com/agndam-corp/web-backend/models"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/gin-gonic/gin"
@@ -176,7 +175,7 @@ func InitAWS() {
 	log.Printf("Initializing AWS with profile: %s, region: %s", defaultProfile, defaultRegion)
 
 	// Test loading AWS configuration with specific profile for Roles Anywhere
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
+	_, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(defaultRegion),
 		config.WithSharedConfigProfile(defaultProfile), // Specify the profile to use
 		config.WithSharedConfigFiles([]string{"/root/.aws/config"}), // Explicitly specify config file path
@@ -185,7 +184,7 @@ func InitAWS() {
 		log.Printf("Failed to load AWS SDK config with profile %s: %v", defaultProfile, err)
 		
 		// Try loading with only region as fallback
-		cfg, err = config.LoadDefaultConfig(context.TODO(),
+		_, err = config.LoadDefaultConfig(context.TODO(),
 			config.WithRegion(defaultRegion),
 		)
 		if err != nil {
