@@ -145,7 +145,6 @@ func createEC2ClientForRegion(region string) (*ec2.Client, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(region),
 		config.WithSharedConfigProfile(defaultProfile), // Use same profile for all regions
-		config.WithSharedConfigFiles([]string{"/root/.aws/config"}), // Ensure config file is used
 	)
 	if err != nil {
 		log.Printf("Failed to load AWS config for region %s: %v", region, err)
@@ -174,24 +173,21 @@ func InitAWS() {
 	
 	log.Printf("Initializing AWS with profile: %s, region: %s", defaultProfile, defaultRegion)
 
-	// Test loading AWS configuration with specific profile for Roles Anywhere
-	_, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(defaultRegion),
-		config.WithSharedConfigProfile(defaultProfile), // Specify the profile to use
-		config.WithSharedConfigFiles([]string{"/root/.aws/config"}), // Explicitly specify config file path
+	// Load config using the specified profile - this follows AWS SDK best practices
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithSharedConfigProfile(defaultProfile), // Use the Roles Anywhere profile
 	)
 	if err != nil {
 		log.Printf("Failed to load AWS SDK config with profile %s: %v", defaultProfile, err)
-		
-		// Try loading with only region as fallback
-		_, err = config.LoadDefaultConfig(context.TODO(),
-			config.WithRegion(defaultRegion),
-		)
-		if err != nil {
-			log.Fatalf("Failed to load AWS SDK config: %v", err)
-		}
+		log.Fatalf("Failed to load AWS SDK config: %v", err)
 	} else {
 		log.Printf("Successfully loaded AWS config with profile: %s", defaultProfile)
+		// Use the region from the loaded config or fallback to environment
+		if cfg.Region != "" {
+			log.Printf("Using region from AWS config: %s", cfg.Region)
+		} else {
+			log.Printf("Config region not set, will use environment region: %s", defaultRegion)
+		}
 	}
 
 	// Initialize HTTP client
