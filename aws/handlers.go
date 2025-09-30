@@ -125,7 +125,7 @@ import (
 
 var defaultInstanceID string
 var defaultRegion string
-var defaultConfig aws.Config
+var defaultProfile string
 var defaultHTTPClient *http.Client
 
 // InstanceRequest represents the request body for AWS instance operations
@@ -136,13 +136,22 @@ type InstanceRequest struct {
 
 // createEC2ClientForRegion creates an EC2 client for a specific region
 func createEC2ClientForRegion(region string) (*ec2.Client, error) {
-	if defaultConfig.Region == "" {
-		return nil, fmt.Errorf("default AWS configuration not initialized")
+	if defaultHTTPClient == nil {
+		return nil, fmt.Errorf("AWS clients not initialized properly")
 	}
 
-	// Create a copy of the default configuration with the specified region
-	cfg := defaultConfig.Copy()
-	cfg.Region = region
+	log.Printf("Creating EC2 client for region: %s", region)
+
+	// Create a new configuration with the specified region but preserve credentials
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(region),
+		config.WithSharedConfigProfile(defaultProfile), // Use same profile for all regions
+		config.WithSharedConfigFiles([]string{"/root/.aws/config"}), // Ensure config file is used
+	)
+	if err != nil {
+		log.Printf("Failed to load AWS config for region %s: %v", region, err)
+		return nil, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
+	}
 
 	// Create EC2 client with the region-specific configuration
 	ec2Client := ec2.NewFromConfig(cfg, func(o *ec2.Options) {
@@ -157,19 +166,36 @@ func InitAWS() {
 	// Get the default instance ID and region from environment variable
 	defaultInstanceID = os.Getenv("VPN_INSTANCE_ID")
 	defaultRegion = os.Getenv("AWS_REGION")
+	
+	// Get the AWS profile name from environment variable
+	defaultProfile = os.Getenv("AWS_PROFILE")
+	if defaultProfile == "" {
+		defaultProfile = "default"
+	}
+	
+	log.Printf("Initializing AWS with profile: %s, region: %s", defaultProfile, defaultRegion)
 
-	// Load AWS configuration using the default credential chain
-	// This will automatically use the AWS config file if AWS_PROFILE is set
+	// Test loading AWS configuration with specific profile for Roles Anywhere
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(defaultRegion),
+		config.WithSharedConfigProfile(defaultProfile), // Specify the profile to use
+		config.WithSharedConfigFiles([]string{"/root/.aws/config"}), // Explicitly specify config file path
 	)
 	if err != nil {
-		log.Fatalf("Failed to load AWS SDK config: %v", err)
+		log.Printf("Failed to load AWS SDK config with profile %s: %v", defaultProfile, err)
+		
+		// Try loading with only region as fallback
+		cfg, err = config.LoadDefaultConfig(context.TODO(),
+			config.WithRegion(defaultRegion),
+		)
+		if err != nil {
+			log.Fatalf("Failed to load AWS SDK config: %v", err)
+		}
+	} else {
+		log.Printf("Successfully loaded AWS config with profile: %s", defaultProfile)
 	}
 
-	// Store the config for later use with different regions
-	defaultConfig = cfg
-	// Use the default HTTP client from the config
+	// Initialize HTTP client
 	defaultHTTPClient = &http.Client{}
 }
 
