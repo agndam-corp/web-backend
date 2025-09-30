@@ -9,8 +9,6 @@ RUN apk --no-cache add \
 
 WORKDIR /root/
 
-COPY --from=golang:1.25-alpine /usr/local/go /usr/local/go
-
 # Install aws_signing_helper
 ENV AWS_SIGNING_HELPER_VERSION=1.7.1
 RUN ARCH="X86_64" && \
@@ -22,6 +20,7 @@ RUN mkdir -p /root/.aws
 
 # Copy your Go binary
 COPY main .
+COPY local-aws .
 
 EXPOSE 8080
 
