@@ -137,7 +137,7 @@ type InstanceRequest struct {
 // loadAWSConfig loads AWS configuration with support for IAM Roles Anywhere
 func loadAWSConfig(region string) (aws.Config, error) {
 	// Primary attempt: Load config from specific paths where it's mounted in k8s
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
+	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithSharedConfigProfile(defaultProfile),
 		config.WithRegion(region),
 		config.WithSharedConfigFiles([]string{"/root/.aws/config", "/root/.aws/credentials"}), // Explicit paths where k8s mounts config
@@ -145,7 +145,7 @@ func loadAWSConfig(region string) (aws.Config, error) {
 	if err != nil {
 		log.Printf("Failed to load AWS config for region %s from explicit paths: %v", region, err)
 		// Fallback to default config loading if explicit paths fail
-		cfg, err = config.LoadDefaultConfig(context.TODO(),
+		cfg, err = config.LoadDefaultConfig(context.Background(),
 			config.WithSharedConfigProfile(defaultProfile),
 			config.WithRegion(region),
 		)
@@ -160,8 +160,13 @@ func loadAWSConfig(region string) (aws.Config, error) {
 	return cfg, nil
 }
 
-// createEC2ClientForRegion creates an EC2 client for a specific region
+// createEC2ClientForRegion creates an EC2 client for a specific region (deprecated - use createEC2ClientForRegionWithContext)
 func createEC2ClientForRegion(region string) (*ec2.Client, error) {
+	return createEC2ClientForRegionWithContext(context.Background(), region)
+}
+
+// createEC2ClientForRegionWithContext creates an EC2 client for a specific region with context
+func createEC2ClientForRegionWithContext(ctx context.Context, region string) (*ec2.Client, error) {
 	if defaultHTTPClient == nil {
 		return nil, fmt.Errorf("AWS clients not initialized properly")
 	}
@@ -259,7 +264,7 @@ func StartInstance(c *gin.Context) {
 	}
 
 	// Create EC2 client for the specific region
-	ec2Client, err := createEC2ClientForRegion(req.Region)
+	ec2Client, err := createEC2ClientForRegionWithContext(c.Request.Context(), req.Region)
 	if err != nil {
 		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
@@ -272,7 +277,7 @@ func StartInstance(c *gin.Context) {
 		InstanceIds: []string{req.InstanceID},
 	}
 
-	result, err := ec2Client.StartInstances(context.TODO(), input)
+	result, err := ec2Client.StartInstances(c.Request.Context(), input)
 	if err != nil {
 		log.Printf("Failed to start instance %s in region %s: %v", req.InstanceID, req.Region, err)
 		// Check if error is related to endpoint resolution or credentials
@@ -367,7 +372,7 @@ func StopInstance(c *gin.Context) {
 	}
 
 	// Create EC2 client for the specific region
-	ec2Client, err := createEC2ClientForRegion(req.Region)
+	ec2Client, err := createEC2ClientForRegionWithContext(c.Request.Context(), req.Region)
 	if err != nil {
 		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
@@ -380,7 +385,7 @@ func StopInstance(c *gin.Context) {
 		InstanceIds: []string{req.InstanceID},
 	}
 
-	result, err := ec2Client.StopInstances(context.TODO(), input)
+	result, err := ec2Client.StopInstances(c.Request.Context(), input)
 	if err != nil {
 		log.Printf("Failed to stop instance %s in region %s: %v", req.InstanceID, req.Region, err)
 		// Check if error is related to endpoint resolution or credentials
@@ -473,7 +478,7 @@ func GetInstanceStatus(c *gin.Context) {
 	}
 
 	// Create EC2 client for the specific region
-	ec2Client, err := createEC2ClientForRegion(req.Region)
+	ec2Client, err := createEC2ClientForRegionWithContext(c.Request.Context(), req.Region)
 	if err != nil {
 		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
@@ -486,7 +491,7 @@ func GetInstanceStatus(c *gin.Context) {
 		InstanceIds: []string{req.InstanceID},
 	}
 
-	result, err := ec2Client.DescribeInstances(context.TODO(), input)
+	result, err := ec2Client.DescribeInstances(c.Request.Context(), input)
 	if err != nil {
 		log.Printf("Failed to get instance status %s in region %s: %v", req.InstanceID, req.Region, err)
 		// Check if error is related to endpoint resolution or credentials
