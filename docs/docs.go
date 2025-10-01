@@ -701,6 +701,36 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/test-iam-anywhere": {
+            "get": {
+                "description": "Test endpoint that uses the exact same AWS configuration as the working test",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VPN Management"
+                ],
+                "summary": "Test IAM Anywhere connection",
+                "responses": {
+                    "200": {
+                        "description": "Test results",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Error message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {

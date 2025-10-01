@@ -572,4 +572,25 @@ paths:
       summary: Stop VPN instance
       tags:
       - VPN Management
+  /test-iam-anywhere:
+    get:
+      description: Test endpoint that uses the exact same AWS configuration as the
+        working test
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Test results
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Error message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Test IAM Anywhere connection
+      tags:
+      - VPN Management
 swagger: "2.0"

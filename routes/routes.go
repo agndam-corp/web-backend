@@ -91,6 +91,9 @@ func SetupRoutes(router *gin.Engine) {
 		protected.POST("/stop", aws.StopInstance)
 		protected.GET("/status", aws.GetInstanceStatus)
 
+		// Test IAM Anywhere endpoint - uses exact same code as working test
+		protected.GET("/test-iam-anywhere", aws.TestIAMAnywareEndpoint)
+
 		// AWS Instance management routes
 		protected.GET("/instances", aws.GetInstances)
 		protected.POST("/instances", aws.CreateInstance)
