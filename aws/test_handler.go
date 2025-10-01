@@ -5,20 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/gin-gonic/gin"
 )
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 // TestIAMAnywhereEndpoint godoc
 //
@@ -30,43 +21,10 @@ func min(a, b int) int {
 //	@Failure		500	{object}	map[string]string		"Error message"
 //	@Router			/test-iam-anywhere [get]
 func TestIAMAnywhereEndpoint(c *gin.Context) {
-	awsProfile := os.Getenv("AWS_PROFILE")
-	if awsProfile == "" {
-		awsProfile = "rolesanywhere-profile"
-	}
+	// Use the global EC2 client that was initialized at startup
+	ec2Client := GetEC2Client()
 
-	region := os.Getenv("AWS_REGION")
-	if region == "" {
-		region = "us-east-1"
-	}
-
-	log.Printf("Testing AWS connection with profile: %s, region: %s", awsProfile, region)
-
-	// Load AWS config using the same approach as the working test
-	cfg, err := config.LoadDefaultConfig(context.Background(),
-		config.WithSharedConfigProfile(awsProfile),
-		config.WithRegion(region),
-	)
-	if err != nil {
-		log.Printf("Failed to load AWS config: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
-		return
-	}
-
-	log.Printf("AWS Config loaded successfully. Region: %s", cfg.Region)
-	log.Printf("AWS Config loaded successfully. EndpointResolver: %v", cfg.EndpointResolver)
-	
-	// Try to retrieve and log credential details
-	creds, err := cfg.Credentials.Retrieve(context.Background())
-	if err != nil {
-		log.Printf("Failed to retrieve credentials: %v", err)
-	} else {
-		log.Printf("Credentials retrieved successfully. AccessKeyID: %s, ProviderName: %s", 
-			creds.AccessKeyID[:min(8, len(creds.AccessKeyID))] + "...", creds.Source)
-		log.Printf("Credentials expiration: %v", creds.Expires)
-	}
-
-	ec2Client := ec2.NewFromConfig(cfg)
+	log.Printf("Using pre-initialized EC2 client for region: %s with profile: %s", defaultRegion, defaultProfile)
 
 	// Describe instances
 	log.Println("Attempting to describe EC2 instances...")
