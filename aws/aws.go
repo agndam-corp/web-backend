@@ -1,9 +1,9 @@
 package aws
 
 import (
-	"net/http"
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"sync"
 
@@ -13,76 +13,70 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Package-level variables
 var (
-	ec2Client     *ec2.Client
-	defaultRegion string
+	defaultRegion  string
 	defaultProfile string
-	once          sync.Once
+	once           sync.Once
 )
 
-// InitAWS initializes AWS SDK using IAM Roles Anywhere profile.
-// It is safe to call multiple times; initialization happens only once.
+// InitAWS sets up default region and profile. No client is created globally now.
 func InitAWS() {
 	once.Do(func() {
-		// Default region
 		defaultRegion = os.Getenv("AWS_REGION")
 		if defaultRegion == "" {
 			defaultRegion = "us-east-1"
 		}
 
-		// AWS profile for IAM Roles Anywhere
 		defaultProfile = os.Getenv("AWS_PROFILE")
 		if defaultProfile == "" {
 			defaultProfile = "rolesanywhere-profile"
 		}
 
-		log.Printf("Initializing AWS SDK with profile '%s' and region '%s'", defaultProfile, defaultRegion)
-
-		// Load config using shared config and credential_process
-		cfg, err := config.LoadDefaultConfig(context.Background(),
-			config.WithSharedConfigProfile(defaultProfile),
-			config.WithRegion(defaultRegion),
-		)
-		if err != nil {
-			log.Fatalf("Failed to load AWS config: %v", err)
-		}
-
-		// Create EC2 client
-		ec2Client = ec2.NewFromConfig(cfg)
-
-		// Test credentials
-		creds, err := cfg.Credentials.Retrieve(context.Background())
-		if err != nil {
-			log.Fatalf("Failed to retrieve IAM Anywhere credentials: %v", err)
-		}
-
-		log.Printf("AWS credentials loaded: AccessKeyID=%s..., ProviderName=%s, Expires=%v",
-			creds.AccessKeyID[:8], creds.Source, creds.Expires)
+		log.Printf("AWS initialized with profile=%s region=%s", defaultProfile, defaultRegion)
 	})
 }
 
-// GetEC2Client returns the initialized EC2 client
-func GetEC2Client() *ec2.Client {
-	if ec2Client == nil {
-		log.Fatal("EC2 client not initialized. Call InitAWS() first.")
+// getEC2Client creates a new EC2 client for the given region
+func getEC2Client(ctx context.Context, region string) (*ec2.Client, error) {
+	if region == "" {
+		region = defaultRegion
 	}
-	return ec2Client
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithSharedConfigProfile(defaultProfile),
+		config.WithRegion(region),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Test credentials
+	creds, err := cfg.Credentials.Retrieve(ctx)
+	if err != nil {
+		log.Printf("Failed to retrieve credentials: %v", err)
+	} else {
+		log.Printf("Credentials loaded: AccessKeyID=%s..., ProviderName=%s, Expires=%v",
+			creds.AccessKeyID[:8], creds.Source, creds.Expires)
+	}
+
+	return ec2.NewFromConfig(cfg), nil
 }
 
-// Example helper function: Describe up to 5 EC2 instances
-func DescribeInstances(ctx context.Context) {
-	client := GetEC2Client()
+// DescribeInstances helper: describes up to 5 instances in a given region
+func DescribeInstances(ctx context.Context, region string) error {
+	client, err := getEC2Client(ctx, region)
+	if err != nil {
+		return err
+	}
+
 	output, err := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		MaxResults: aws.Int32(5),
 	})
 	if err != nil {
-		log.Fatalf("DescribeInstances failed: %v", err)
+		return err
 	}
 
 	log.Printf("Found %d reservations", len(output.Reservations))
 	for i, r := range output.Reservations {
-		log.Printf("Reservation %d: %d instances", i+1, len(r.Instances))
 		for j, inst := range r.Instances {
 			id := "unknown"
 			state := "unknown"
@@ -92,27 +86,28 @@ func DescribeInstances(ctx context.Context) {
 			if inst.State != nil {
 				state = string(inst.State.Name)
 			}
-			log.Printf("  Instance %d: %s - %s", j+1, id, state)
+			log.Printf("Reservation %d - Instance %d: %s (%s)", i+1, j+1, id, state)
 		}
 	}
+	return nil
 }
 
-// TestIAMAnywhereEndpoint handles /test-iam-anywhere route
+// TestIAMAnywhereEndpoint handles /test-iam-anywhere
 func TestIAMAnywhereEndpoint(c *gin.Context) {
-	client := GetEC2Client()
+	client, err := getEC2Client(c.Request.Context(), "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": err.Error()})
+		return
+	}
 
 	output, err := client.DescribeInstances(c.Request.Context(), &ec2.DescribeInstancesInput{
 		MaxResults: aws.Int32(5),
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": "error",
-			"error":  err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": err.Error()})
 		return
 	}
 
-	// Build structured response
 	var instances []map[string]interface{}
 	for i, r := range output.Reservations {
 		for j, inst := range r.Instances {
