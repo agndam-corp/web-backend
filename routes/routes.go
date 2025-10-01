@@ -78,28 +78,28 @@ func SetupRoutes(router *gin.Engine) {
 		})
 
 		// Admin endpoint to manage AWS instances
-		adminGroup.POST("/instances", aws.AdminCreateInstance)
-		adminGroup.PUT("/instances/:id", aws.AdminUpdateInstance)
-		adminGroup.DELETE("/instances/:id", aws.AdminDeleteInstance)
+		// adminGroup.POST("/instances", aws.AdminCreateInstance)
+		// adminGroup.PUT("/instances/:id", aws.AdminUpdateInstance)
+		// adminGroup.DELETE("/instances/:id", aws.AdminDeleteInstance)
 	}
 
 	// Protected AWS routes (require authentication)
 	protected := router.Group("/")
 	protected.Use(middleware.AuthMiddleware)
 	{
-		protected.POST("/start", aws.StartInstance)
-		protected.POST("/stop", aws.StopInstance)
-		protected.GET("/status", aws.GetInstanceStatus)
+		// protected.POST("/start", aws.StartInstance)
+		// protected.POST("/stop", aws.StopInstance)
+		// protected.GET("/status", aws.GetInstanceStatus)
 
 		// Test IAM Anywhere endpoint - uses exact same code as working test
 		protected.GET("/test-iam-anywhere", aws.TestIAMAnywhereEndpoint)
 
 		// AWS Instance management routes
-		protected.GET("/instances", aws.GetInstances)
-		protected.POST("/instances", aws.CreateInstance)
-		protected.GET("/instances/:id", aws.GetInstance)
-		protected.PUT("/instances/:id", aws.UpdateInstance)
-		protected.DELETE("/instances/:id", aws.DeleteInstance)
+		// protected.GET("/instances", aws.GetInstances)
+		// protected.POST("/instances", aws.CreateInstance)
+		// protected.GET("/instances/:id", aws.GetInstance)
+		// protected.PUT("/instances/:id", aws.UpdateInstance)
+		// protected.DELETE("/instances/:id", aws.DeleteInstance)
 
 		// Auth check endpoint that returns user info
 		protected.GET("/auth-check", func(c *gin.Context) {
