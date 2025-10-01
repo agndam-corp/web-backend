@@ -1,7 +1,6 @@
 package aws
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -28,7 +27,7 @@ func TestIAMAnywhereEndpoint(c *gin.Context) {
 
 	// Describe instances
 	log.Println("Attempting to describe EC2 instances...")
-	output, err := ec2Client.DescribeInstances(context.Background(), &ec2.DescribeInstancesInput{
+	output, err := ec2Client.DescribeInstances(c.Request.Context(), &ec2.DescribeInstancesInput{
 		MaxResults: aws.Int32(5),
 	})
 	if err != nil {

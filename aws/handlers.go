@@ -9,7 +9,6 @@ import (
 
 	"github.com/agndam-corp/web-backend/database"
 	"github.com/agndam-corp/web-backend/models"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -79,19 +78,19 @@ func StartInstance(c *gin.Context) {
 
 	// If the region differs from the default, we may need to create a regional client
 	// For now, using the default region client - this may need to be adjusted based on your specific needs
-	if req.Region != defaultRegion {
-		// Create a regional client with the same configuration but different region
-		regionCfg, err := config.LoadDefaultConfig(c.Request.Context(),
-			config.WithSharedConfigProfile(defaultProfile),
-			config.WithRegion(req.Region),
-		)
-		if err != nil {
-			log.Printf("Failed to load AWS config for region %s: %v", req.Region, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
-			return
-		}
-		ec2Client = ec2.NewFromConfig(regionCfg)
-	}
+	// if req.Region != defaultRegion {
+	// 	// Create a regional client with the same configuration but different region
+	// 	regionCfg, err := config.LoadDefaultConfig(c.Request.Context(),
+	// 		config.WithSharedConfigProfile(defaultProfile),
+	// 		config.WithRegion(req.Region),
+	// 	)
+	// 	if err != nil {
+	// 		log.Printf("Failed to load AWS config for region %s: %v", req.Region, err)
+	// 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
+	// 		return
+	// 	}
+	// 	ec2Client = ec2.NewFromConfig(regionCfg)
+	// }
 
 	input := &ec2.StartInstancesInput{
 		InstanceIds: []string{req.InstanceID},
@@ -200,19 +199,19 @@ func StopInstance(c *gin.Context) {
 
 	// If the region differs from the default, we may need to create a regional client
 	// For now, using the default region client - this may need to be adjusted based on your specific needs
-	if req.Region != defaultRegion {
-		// Create a regional client with the same configuration but different region
-		regionCfg, err := config.LoadDefaultConfig(c.Request.Context(),
-			config.WithSharedConfigProfile(defaultProfile),
-			config.WithRegion(req.Region),
-		)
-		if err != nil {
-			log.Printf("Failed to load AWS config for region %s: %v", req.Region, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
-			return
-		}
-		ec2Client = ec2.NewFromConfig(regionCfg)
-	}
+	// if req.Region != defaultRegion {
+	// 	// Create a regional client with the same configuration but different region
+	// 	regionCfg, err := config.LoadDefaultConfig(c.Request.Context(),
+	// 		config.WithSharedConfigProfile(defaultProfile),
+	// 		config.WithRegion(req.Region),
+	// 	)
+	// 	if err != nil {
+	// 		log.Printf("Failed to load AWS config for region %s: %v", req.Region, err)
+	// 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
+	// 		return
+	// 	}
+	// 	ec2Client = ec2.NewFromConfig(regionCfg)
+	// }
 
 	input := &ec2.StopInstancesInput{
 		InstanceIds: []string{req.InstanceID},
@@ -319,19 +318,19 @@ func GetInstanceStatus(c *gin.Context) {
 
 	// If the region differs from the default, we may need to create a regional client
 	// For now, using the default region client - this may need to be adjusted based on your specific needs
-	if req.Region != defaultRegion {
-		// Create a regional client with the same configuration but different region
-		regionCfg, err := config.LoadDefaultConfig(c.Request.Context(),
-			config.WithSharedConfigProfile(defaultProfile),
-			config.WithRegion(req.Region),
-		)
-		if err != nil {
-			log.Printf("Failed to load AWS config for region %s: %v", req.Region, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
-			return
-		}
-		ec2Client = ec2.NewFromConfig(regionCfg)
-	}
+	// if req.Region != defaultRegion {
+	// 	// Create a regional client with the same configuration but different region
+	// 	regionCfg, err := config.LoadDefaultConfig(c.Request.Context(),
+	// 		config.WithSharedConfigProfile(defaultProfile),
+	// 		config.WithRegion(req.Region),
+	// 	)
+	// 	if err != nil {
+	// 		log.Printf("Failed to load AWS config for region %s: %v", req.Region, err)
+	// 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
+	// 		return
+	// 	}
+	// 	ec2Client = ec2.NewFromConfig(regionCfg)
+	// }
 
 	input := &ec2.DescribeInstancesInput{
 		InstanceIds: []string{req.InstanceID},
