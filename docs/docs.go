@@ -139,7 +139,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "204": {
-                        "description": "Instance deleted successfully"
+                        "description": "No Content"
                     },
                     "404": {
                         "description": "Instance not found",
@@ -529,7 +529,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "204": {
-                        "description": "Instance deleted successfully"
+                        "description": "No Content"
                     },
                     "404": {
                         "description": "Instance not found",

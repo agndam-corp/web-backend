@@ -162,7 +162,7 @@ paths:
       - application/json
       responses:
         "204":
-          description: Instance deleted successfully
+          description: No Content
         "404":
           description: Instance not found
           schema:
@@ -394,7 +394,7 @@ paths:
       - application/json
       responses:
         "204":
-          description: Instance deleted successfully
+          description: No Content
         "404":
           description: Instance not found
           schema:

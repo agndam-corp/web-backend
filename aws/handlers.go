@@ -1,132 +1,18 @@
-/*
-Package aws provides AWS EC2 instance management functionality.
-
-This package handles the management of AWS EC2 instances including:
-- Starting, stopping, and checking the status of EC2 instances
-- Managing instance configurations in the database
-- Supporting multi-region AWS operations
-- Providing admin-level instance management capabilities
-
-# API Endpoints
-
-## Instance Operations
-
-### Start Instance
-
-	POST /start
-	Starts an EC2 instance. Accepts instanceId and region in request body.
-
-### Stop Instance
-
-	POST /stop
-	Stops an EC2 instance. Accepts instanceId and region in request body.
-
-### Get Instance Status
-
-	GET /status?instanceId=...&region=...
-	Gets the status of an EC2 instance. Accepts instanceId and region as query parameters.
-
-## Instance Management
-
-### List Instances (User)
-
-	GET /instances
-	Get all instances owned by the current user.
-
-### Get Instance (User)
-
-	GET /instances/:id
-	Get a specific instance by ID.
-
-### Create Instance (User)
-
-	POST /instances
-	Create a new instance configuration.
-
-### Update Instance (User)
-
-	PUT /instances/:id
-	Update an existing instance configuration.
-
-### Delete Instance (User)
-
-	DELETE /instances/:id
-	Delete an instance configuration.
-
-## Admin Instance Management
-
-### Create Instance (Admin)
-
-	POST /admin/instances
-	Admin endpoint to create an instance for any user.
-
-### Update Instance (Admin)
-
-	PUT /admin/instances/:id
-	Admin endpoint to update any instance.
-
-### Delete Instance (Admin)
-
-	DELETE /admin/instances/:id
-	Admin endpoint to delete any instance.
-
-## Request/Response Examples
-
-### Start/Stop Instance Request
-
-	{
-	  "instanceId": "i-1234567890abcdef0",
-	  "region": "us-west-2"
-	}
-
-### Instance Status Response
-
-	{
-	  "state": "running",
-	  "name": "i-1234567890abcdef0",
-	  "region": "us-west-2"
-	}
-
-### List Instances Response
-
-	[
-	  {
-	    "id": 1,
-	    "name": "My VPN Server",
-	    "instanceId": "i-1234567890abcdef0",
-	    "region": "us-west-2",
-	    "description": "Primary VPN server",
-	    "status": "running",
-	    "createdBy": 1,
-	    "createdAt": "2023-01-01T00:00:00Z",
-	    "updatedAt": "2023-01-01T00:00:00Z"
-	  }
-	]
-*/
 package aws
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
 	"github.com/agndam-corp/web-backend/database"
 	"github.com/agndam-corp/web-backend/models"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
-
-var defaultInstanceID string
-var defaultRegion string
-var defaultProfile string
-var defaultHTTPClient *http.Client
 
 // InstanceRequest represents the request body for AWS instance operations
 type InstanceRequest struct {
@@ -134,76 +20,7 @@ type InstanceRequest struct {
 	Region     string `json:"region" form:"region"`
 }
 
-// loadAWSConfig loads AWS configuration with support for IAM Roles Anywhere
-func loadAWSConfig(region string) (aws.Config, error) {
-	// Load config using the same approach as the working test - let AWS SDK find config files automatically
-	cfg, err := config.LoadDefaultConfig(context.Background(),
-		config.WithSharedConfigProfile(defaultProfile),
-		config.WithRegion(region),
-	)
-	if err != nil {
-		log.Printf("Failed to load AWS config for region %s with profile %s: %v", region, defaultProfile, err)
-		return cfg, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
-	} else {
-		log.Printf("Successfully loaded AWS config with profile: %s for region: %s", defaultProfile, region)
-	}
-
-	return cfg, nil
-}
-
-// createEC2ClientForRegion creates an EC2 client for a specific region (deprecated - use createEC2ClientForRegionWithContext)
-func createEC2ClientForRegion(region string) (*ec2.Client, error) {
-	return createEC2ClientForRegionWithContext(context.Background(), region)
-}
-
-// createEC2ClientForRegionWithContext creates an EC2 client for a specific region with context
-func createEC2ClientForRegionWithContext(ctx context.Context, region string) (*ec2.Client, error) {
-	if defaultHTTPClient == nil {
-		return nil, fmt.Errorf("AWS clients not initialized properly")
-	}
-
-	log.Printf("Creating EC2 client for region: %s", region)
-
-	cfg, err := loadAWSConfig(region)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create EC2 client with the region-specific configuration
-	ec2Client := ec2.NewFromConfig(cfg)
-
-	return ec2Client, nil
-}
-
-// InitAWS initializes AWS clients with support for credential chain including IAM Roles Anywhere
-func InitAWS() {
-	// Get the default instance ID and region from environment variable
-	defaultInstanceID = os.Getenv("VPN_INSTANCE_ID")
-	defaultRegion = os.Getenv("AWS_REGION")
-	if defaultRegion == "" {
-		defaultRegion = "us-east-1" // Default to us-east-1 if not specified
-	}
-	
-	// Get the AWS profile name from environment variable
-	defaultProfile = os.Getenv("AWS_PROFILE")
-	if defaultProfile == "" {
-		defaultProfile = "rolesanywhere-profile"  // Use the Roles Anywhere profile by default
-	}
-	
-	log.Printf("Initializing AWS with profile: %s, region: %s", defaultProfile, defaultRegion)
-
-	// Use the shared function to load config - this ensures consistency
-	_, err := loadAWSConfig(defaultRegion)
-	if err != nil {
-		log.Printf("Failed to load AWS SDK config with profile %s: %v", defaultProfile, err)
-		log.Fatalf("Failed to load AWS SDK config: %v", err)
-	}
-
-	// Initialize HTTP client
-	defaultHTTPClient = &http.Client{}
-}
-
-// StartInstance	godoc
+// StartInstance godoc
 //
 //	@Summary		Start VPN instance
 //	@Description	Start the VPN EC2 instance
@@ -254,16 +71,11 @@ func StartInstance(c *gin.Context) {
 		return
 	}
 
-	// Create EC2 client for the specific region
-	ec2Client, err := createEC2ClientForRegionWithContext(c.Request.Context(), req.Region)
-	if err != nil {
-		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
-		return
-	}
+	// Create EC2 client with the loaded configuration
+	ec2Client := ec2.NewFromConfig(GetAWSConfig())
 
 	log.Printf("About to start AWS instance %s in region %s", req.InstanceID, req.Region)
-	
+
 	input := &ec2.StartInstancesInput{
 		InstanceIds: []string{req.InstanceID},
 	}
@@ -275,7 +87,9 @@ func StartInstance(c *gin.Context) {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "ResolveEndpointV2") ||
 			strings.Contains(errMsg, "NoCredentialProviders") ||
-			strings.Contains(errMsg, "region") {
+			strings.Contains(errMsg, "region") ||
+			strings.Contains(errMsg, "access") ||
+			strings.Contains(errMsg, "credentials") {
 			log.Printf("AWS configuration error when starting instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
 		} else {
@@ -284,13 +98,13 @@ func StartInstance(c *gin.Context) {
 		}
 		return
 	}
-	
+
 	log.Printf("Successfully sent start command for instance %s", req.InstanceID)
 
-	log.Printf("Start instance result: %v", result)
 	if len(result.StartingInstances) > 0 {
 		// Update only the status in the database
-		if err := database.DB.Model(&dbInstance).Update("Status", string(result.StartingInstances[0].CurrentState.Name)).Error; err != nil {
+		instanceState := string(result.StartingInstances[0].CurrentState.Name)
+		if err := database.DB.Model(&dbInstance).Update("Status", instanceState).Error; err != nil {
 			log.Printf("Failed to update instance status in database: %v", err)
 			// Continue anyway, just log the error
 		}
@@ -311,7 +125,7 @@ func StartInstance(c *gin.Context) {
 	}
 }
 
-// StopInstance	godoc
+// StopInstance godoc
 //
 //	@Summary		Stop VPN instance
 //	@Description	Stop the VPN EC2 instance
@@ -362,16 +176,11 @@ func StopInstance(c *gin.Context) {
 		return
 	}
 
-	// Create EC2 client for the specific region
-	ec2Client, err := createEC2ClientForRegionWithContext(c.Request.Context(), req.Region)
-	if err != nil {
-		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
-		return
-	}
+	// Create EC2 client with the loaded configuration
+	ec2Client := ec2.NewFromConfig(GetAWSConfig())
 
 	log.Printf("About to stop AWS instance %s in region %s", req.InstanceID, req.Region)
-	
+
 	input := &ec2.StopInstancesInput{
 		InstanceIds: []string{req.InstanceID},
 	}
@@ -383,7 +192,9 @@ func StopInstance(c *gin.Context) {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "ResolveEndpointV2") ||
 			strings.Contains(errMsg, "NoCredentialProviders") ||
-			strings.Contains(errMsg, "region") {
+			strings.Contains(errMsg, "region") ||
+			strings.Contains(errMsg, "access") ||
+			strings.Contains(errMsg, "credentials") {
 			log.Printf("AWS configuration error when stopping instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
 		} else {
@@ -392,13 +203,13 @@ func StopInstance(c *gin.Context) {
 		}
 		return
 	}
-	
+
 	log.Printf("Successfully sent stop command for instance %s", req.InstanceID)
 
-	log.Printf("Stop instance result: %v", result)
 	if len(result.StoppingInstances) > 0 {
 		// Update only the status in the database
-		if err := database.DB.Model(&dbInstance).Update("Status", string(result.StoppingInstances[0].CurrentState.Name)).Error; err != nil {
+		instanceState := string(result.StoppingInstances[0].CurrentState.Name)
+		if err := database.DB.Model(&dbInstance).Update("Status", instanceState).Error; err != nil {
 			log.Printf("Failed to update instance status in database: %v", err)
 			// Continue anyway, just log the error
 		}
@@ -419,7 +230,7 @@ func StopInstance(c *gin.Context) {
 	}
 }
 
-// GetInstanceStatus	godoc
+// GetInstanceStatus godoc
 //
 //	@Summary		Get VPN instance status
 //	@Description	Get the current status of the VPN EC2 instance
@@ -468,16 +279,11 @@ func GetInstanceStatus(c *gin.Context) {
 		return
 	}
 
-	// Create EC2 client for the specific region
-	ec2Client, err := createEC2ClientForRegionWithContext(c.Request.Context(), req.Region)
-	if err != nil {
-		log.Printf("Failed to create EC2 client for region %s: %v", req.Region, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create AWS client: %v", err)})
-		return
-	}
+	// Create EC2 client with the loaded configuration
+	ec2Client := ec2.NewFromConfig(GetAWSConfig())
 
 	log.Printf("About to query AWS for instance %s in region %s", req.InstanceID, req.Region)
-	
+
 	input := &ec2.DescribeInstancesInput{
 		InstanceIds: []string{req.InstanceID},
 	}
@@ -489,7 +295,9 @@ func GetInstanceStatus(c *gin.Context) {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "ResolveEndpointV2") ||
 			strings.Contains(errMsg, "NoCredentialProviders") ||
-			strings.Contains(errMsg, "region") {
+			strings.Contains(errMsg, "region") ||
+			strings.Contains(errMsg, "access") ||
+			strings.Contains(errMsg, "credentials") {
 			log.Printf("AWS configuration error for instance %s: %v", req.InstanceID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("AWS configuration error: %v", err)})
 		} else {
@@ -498,7 +306,7 @@ func GetInstanceStatus(c *gin.Context) {
 		}
 		return
 	}
-	
+
 	log.Printf("Successfully retrieved instance status for %s, result count: %d", req.InstanceID, len(result.Reservations))
 
 	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
@@ -570,7 +378,7 @@ func GetInstances(c *gin.Context) {
 //	@Router			/instances/{id} [get]
 func GetInstance(c *gin.Context) {
 	idParam := c.Param("id")
-	
+
 	// Convert the ID parameter to uint
 	id, err := strconv.ParseUint(idParam, 10, 32)
 	if err != nil {
@@ -600,10 +408,10 @@ func GetInstance(c *gin.Context) {
 //	@Tags			VPN Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
-//	@Success		201			{object}	models.AWSInstance	"Created AWS instance"
-//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
-//	@Failure		500			{object}	types.ErrorResponse	"Failed to create instance"
+//	@Param			instance	body		models.AWSInstance		true	"AWS Instance"
+//	@Success		201			{object}	models.AWSInstance		"Created AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse		"Bad request"
+//	@Failure		500			{object}	types.ErrorResponse		"Failed to create instance"
 //	@Router			/instances [post]
 func CreateInstance(c *gin.Context) {
 	var req models.AWSInstance
@@ -659,15 +467,15 @@ func CreateInstance(c *gin.Context) {
 //	@Accept			json
 //	@Produce		json
 //	@Param			id			path		string				true	"Instance ID"
-//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
-//	@Success		200			{object}	models.AWSInstance	"Updated AWS instance"
-//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
-//	@Failure		404			{object}	types.ErrorResponse	"Instance not found"
-//	@Failure		500			{object}	types.ErrorResponse	"Failed to update instance"
+//	@Param			instance	body		models.AWSInstance		true	"AWS Instance"
+//	@Success		200			{object}	models.AWSInstance		"Updated AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse		"Bad request"
+//	@Failure		404			{object}	types.ErrorResponse		"Instance not found"
+//	@Failure		500			{object}	types.ErrorResponse		"Failed to update instance"
 //	@Router			/instances/{id} [put]
 func UpdateInstance(c *gin.Context) {
 	idParam := c.Param("id")
-	
+
 	// Convert the ID parameter to uint
 	id, err := strconv.ParseUint(idParam, 10, 32)
 	if err != nil {
@@ -713,14 +521,14 @@ func UpdateInstance(c *gin.Context) {
 //	@Description	Delete an AWS instance configuration from the database
 //	@Tags			VPN Management
 //	@Produce		json
-//	@Param			id	path	string	true	"Instance ID"
-//	@Success		204	"Instance deleted successfully"
+//	@Param			id	path		string				true	"Instance ID"
+//	@Success		204	"No Content"
 //	@Failure		404	{object}	types.ErrorResponse	"Instance not found"
 //	@Failure		500	{object}	types.ErrorResponse	"Failed to delete instance"
 //	@Router			/instances/{id} [delete]
 func DeleteInstance(c *gin.Context) {
 	idParam := c.Param("id")
-	
+
 	// Convert the ID parameter to uint
 	id, err := strconv.ParseUint(idParam, 10, 32)
 	if err != nil {
@@ -776,10 +584,10 @@ func DeleteInstance(c *gin.Context) {
 //	@Tags			VPN Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
-//	@Success		201			{object}	models.AWSInstance	"Created AWS instance"
-//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
-//	@Failure		500			{object}	types.ErrorResponse	"Failed to create instance"
+//	@Param			instance	body		models.AWSInstance		true	"AWS Instance"
+//	@Success		201			{object}	models.AWSInstance		"Created AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse		"Bad request"
+//	@Failure		500			{object}	types.ErrorResponse		"Failed to create instance"
 //	@Router			/admin/instances [post]
 func AdminCreateInstance(c *gin.Context) {
 	var req models.AWSInstance
@@ -808,7 +616,7 @@ func AdminCreateInstance(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "User information not available"})
 			return
 		}
-		
+
 		// Convert user ID from string to uint
 		adminUserID, err := strconv.ParseUint(adminUserIDStr.(string), 10, 32)
 		if err != nil {
@@ -837,15 +645,15 @@ func AdminCreateInstance(c *gin.Context) {
 //	@Accept			json
 //	@Produce		json
 //	@Param			id			path		string				true	"Instance ID"
-//	@Param			instance	body		models.AWSInstance	true	"AWS Instance"
-//	@Success		200			{object}	models.AWSInstance	"Updated AWS instance"
-//	@Failure		400			{object}	types.ErrorResponse	"Bad request"
-//	@Failure		404			{object}	types.ErrorResponse	"Instance not found"
-//	@Failure		500			{object}	types.ErrorResponse	"Failed to update instance"
+//	@Param			instance	body		models.AWSInstance		true	"AWS Instance"
+//	@Success		200			{object}	models.AWSInstance		"Updated AWS instance"
+//	@Failure		400			{object}	types.ErrorResponse		"Bad request"
+//	@Failure		404			{object}	types.ErrorResponse		"Instance not found"
+//	@Failure		500			{object}	types.ErrorResponse		"Failed to update instance"
 //	@Router			/admin/instances/{id} [put]
 func AdminUpdateInstance(c *gin.Context) {
 	idParam := c.Param("id")
-	
+
 	// Convert the ID parameter to uint
 	id, err := strconv.ParseUint(idParam, 10, 32)
 	if err != nil {
@@ -892,14 +700,14 @@ func AdminUpdateInstance(c *gin.Context) {
 //	@Description	Delete an AWS instance configuration from the database (admin only)
 //	@Tags			VPN Management
 //	@Produce		json
-//	@Param			id	path	string	true	"Instance ID"
-//	@Success		204	"Instance deleted successfully"
+//	@Param			id	path		string				true	"Instance ID"
+//	@Success		204	"No Content"
 //	@Failure		404	{object}	types.ErrorResponse	"Instance not found"
 //	@Failure		500	{object}	types.ErrorResponse	"Failed to delete instance"
 //	@Router			/admin/instances/{id} [delete]
 func AdminDeleteInstance(c *gin.Context) {
 	idParam := c.Param("id")
-	
+
 	// Convert the ID parameter to uint
 	id, err := strconv.ParseUint(idParam, 10, 32)
 	if err != nil {
