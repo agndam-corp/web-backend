@@ -13,6 +13,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // TestIAMAnywhereEndpoint godoc
 //
 //	@Summary		Test IAM Anywhere connection
@@ -48,7 +55,16 @@ func TestIAMAnywhereEndpoint(c *gin.Context) {
 
 	log.Printf("AWS Config loaded successfully. Region: %s", cfg.Region)
 	log.Printf("AWS Config loaded successfully. EndpointResolver: %v", cfg.EndpointResolver)
-	log.Printf("AWS Config loaded successfully. Credentials: %v", cfg.Credentials)
+	
+	// Try to retrieve and log credential details
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		log.Printf("Failed to retrieve credentials: %v", err)
+	} else {
+		log.Printf("Credentials retrieved successfully. AccessKeyID: %s, ProviderName: %s", 
+			creds.AccessKeyID[:min(8, len(creds.AccessKeyID))] + "...", creds.Source)
+		log.Printf("Credentials expiration: %v", creds.Expires)
+	}
 
 	ec2Client := ec2.NewFromConfig(cfg)
 
