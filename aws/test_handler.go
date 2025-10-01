@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// TestIAMAnywareEndpoint godoc
+// TestIAMAnywhereEndpoint godoc
 //
 //	@Summary		Test IAM Anywhere connection
 //	@Description	Test endpoint that uses the exact same AWS configuration as the working test
@@ -22,7 +22,7 @@ import (
 //	@Success		200	{object}	map[string]interface{}	"Test results"
 //	@Failure		500	{object}	map[string]string		"Error message"
 //	@Router			/test-iam-anywhere [get]
-func TestIAMAnywareEndpoint(c *gin.Context) {
+func TestIAMAnywhereEndpoint(c *gin.Context) {
 	awsProfile := os.Getenv("AWS_PROFILE")
 	if awsProfile == "" {
 		awsProfile = "rolesanywhere-profile"
@@ -45,6 +45,10 @@ func TestIAMAnywareEndpoint(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load AWS config: %v", err)})
 		return
 	}
+
+	log.Printf("AWS Config loaded successfully. Region: %s", cfg.Region)
+	log.Printf("AWS Config loaded successfully. EndpointResolver: %v", cfg.EndpointResolver)
+	log.Printf("AWS Config loaded successfully. Credentials: %v", cfg.Credentials)
 
 	ec2Client := ec2.NewFromConfig(cfg)
 
