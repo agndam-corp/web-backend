@@ -19,7 +19,7 @@ var (
 	once           sync.Once
 )
 
-// InitAWS sets up default region and profile. No client is created globally now.
+// InitAWS sets up default region and profile. Safe to call multiple times.
 func InitAWS() {
 	once.Do(func() {
 		defaultRegion = os.Getenv("AWS_REGION")
@@ -41,6 +41,7 @@ func getEC2Client(ctx context.Context, region string) (*ec2.Client, error) {
 	if region == "" {
 		region = defaultRegion
 	}
+
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithSharedConfigProfile(defaultProfile),
 		config.WithRegion(region),
@@ -58,10 +59,15 @@ func getEC2Client(ctx context.Context, region string) (*ec2.Client, error) {
 			creds.AccessKeyID[:8], creds.Source, creds.Expires)
 	}
 
-	return ec2.NewFromConfig(cfg), nil
+	// Explicitly set EC2 endpoint to avoid ResolveEndpointV2 errors
+	client := ec2.NewFromConfig(cfg, func(o *ec2.Options) {
+		o.EndpointResolver = ec2.EndpointResolverFromURL("https://ec2." + region + ".amazonaws.com")
+	})
+
+	return client, nil
 }
 
-// DescribeInstances helper: describes up to 5 instances in a given region
+// DescribeInstances lists up to 5 EC2 instances in the specified region
 func DescribeInstances(ctx context.Context, region string) error {
 	client, err := getEC2Client(ctx, region)
 	if err != nil {
@@ -89,10 +95,11 @@ func DescribeInstances(ctx context.Context, region string) error {
 			log.Printf("Reservation %d - Instance %d: %s (%s)", i+1, j+1, id, state)
 		}
 	}
+
 	return nil
 }
 
-// TestIAMAnywhereEndpoint handles /test-iam-anywhere
+// TestIAMAnywhereEndpoint handles /test-iam-anywhere route
 func TestIAMAnywhereEndpoint(c *gin.Context) {
 	client, err := getEC2Client(c.Request.Context(), "")
 	if err != nil {
